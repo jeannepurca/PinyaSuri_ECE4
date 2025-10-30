@@ -1,4 +1,5 @@
 from pymavlink import mavutil
+
 import time
 
 class PixhawkInterface:
@@ -19,4 +20,22 @@ class PixhawkInterface:
         if msg:
             print(f"[Pixhawk] Waypoint {msg.seq} reached.")
             return msg.seq
+        return None
+    
+    def get_attitude(self):
+        msg = self.master.recv_match(type='ATTITUDE', blocking=True)
+        if msg:
+            return {'roll': msg.roll, 'pitch': msg.pitch, 'yaw': msg.yaw}
+        return None
+
+    def get_imu(self):
+        msg = self.master.recv_match(type='RAW_IMU', blocking=True)
+        if msg:
+            return {'ax': msg.xacc, 'ay': msg.yacc, 'az': msg.zacc}
+        return None
+
+    def get_gps(self):
+        msg = self.master.recv_match(type='GLOBAL_POSITION_INT', blocking=True)
+        if msg:
+            return {'lat': msg.lat / 1e7, 'lon': msg.lon / 1e7, 'alt': msg.alt / 1000}
         return None
