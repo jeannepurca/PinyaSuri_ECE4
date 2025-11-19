@@ -1,48 +1,98 @@
-import time
+import asyncio
+import csv
+import os
+from datetime import datetime
+import logging
+import pathlib
+
 from pixhawk_interface import PixhawkInterface
 from image_capture import ImageCapture
-from metrics import Metrics
-from utils import log_event
+from ai_classifier import TFLiteClassifier
 
-def main():
-    pixhawk = PixhawkInterface('/dev/serial0', 57600)                   # Connect to Pixhawk
-    camera = ImageCapture("/home/ece4/PINYASURI/drone_images")          # Initialize camera
-    log_file = "/home/ece4/PINYASURI/drone_metrics.csv"
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("Main")
 
-    attitude_history = {'roll': [], 'pitch': [], 'yaw': []}
-    ax_history, ay_history, az_history = [], [], []
+OUTPUT_CSV = "/home/ece4/PINYASURI/image_classification_log.csv"
+MODEL_PATH = "/home/ece4/PINYASURI/pineapple_classifier.tflite"  # put your model here
+IMAGE_DIR = "/home/ece4/PINYASURI/drone_images"
+PIXHAWK_ADDR = "serial:///dev/ttyAMA0:57600"  # change port/baud if needed
 
-    while True:
-        groundspeed = pixhawk.get_groundspeed()                         # Get current groundspeed
-        if groundspeed is not None:                                     # Valid groundspeed
-            print(f"[Main]  Speed: {groundspeed:.2f} m/s")              # Print speed
+async def main():
+    pix = PixhawkInterface(system_address=PIXHAWK_ADDR)
+    await pix.connect(timeout=30)
 
-            # Collect telemetry for metrics
-            att = pixhawk.get_attitude()
-            imu = pixhawk.get_imu()
-            gps = pixhawk.get_gps()
+    pos_queue = asyncio.Queue()
+    prog_queue = asyncio.Queue()
 
-            if att:
-                for k in att: attitude_history[k].append(att[k])
-            if imu:
-                ax_history.append(imu['ax'])
-                ay_history.append(imu['ay'])
-                az_history.append(imu['az'])
+    # start subscribers
+    pos_task = asyncio.create_task(pix.subscribe_positions(pos_queue))
+    prog_task = asyncio.create_task(pix.subscribe_mission_progress(prog_queue))
 
-            # If drone stopped, capture image and compute metrics
-            if groundspeed < 0.5:                                       # Check if drone is stopped
-                print("[Main] Drone stopped — capturing image...")      # Log event
-                image_path = camera.capture_image()                     # Capture image
+    img = ImageCapture(out_dir=IMAGE_DIR)
+    clf = TFLiteClassifier(MODEL_PATH, input_size=(224,224))
 
-                # Compute metrics
-                roll_std, pitch_std, yaw_std = Metrics.flight_stability(attitude_history)
-                rms_vib = Metrics.rms_vibration(ax_history, ay_history, az_history)
+    # ensure CSV exists with header
+    header = ["timestamp_utc","image_path","lat","lon","abs_alt_m","rel_alt_m","mission_item_current","mission_item_total","pred_idx","confidence"]
+    if not os.path.exists(OUTPUT_CSV):
+        with open(OUTPUT_CSV, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(header)
 
-                # Log everything
-                log_event(log_file, waypoint=None, gps=gps, image_path=image_path)
-                print(f"[Metrics] Roll σ={roll_std:.3f}, Pitch σ={pitch_std:.3f}, Yaw σ={yaw_std:.3f}, RMS vib={rms_vib:.3f}")
+    last_progress = -1
+    latest_pos = None
 
-                time.sleep(5)                                           # Avoid repeated captures
+    try:
+        while True:
+            # non-blockingly check mission progress and position
+            try:
+                while True:
+                    prog = prog_queue.get_nowait()
+                    last_progress = prog["current"]
+                    mission_total = prog["total"]
+                    logger.info(f"Mission progress: {last_progress}/{mission_total}")
+            except asyncio.QueueEmpty:
+                pass
+
+            try:
+                # always keep latest position
+                while True:
+                    p = pos_queue.get_nowait()
+                    latest_pos = p
+            except asyncio.QueueEmpty:
+                pass
+
+            # If we detected a new mission item index, capture+classify
+            # (this simple logic captures when current increments)
+            if last_progress >= 0:
+                # Some systems report the same current multiple times; implement capture-on-change
+                # Here we capture whenever current differs from last captured value stored in variable
+                if not hasattr(main, "captured_at_progress"):
+                    main.captured_at_progress = -1
+
+                if last_progress != main.captured_at_progress:
+                    logger.info(f"Waypoint reached (index {last_progress}). Capturing image...")
+                    image_path = img.capture(prefix=f"wp{last_progress}")
+                    # run classification
+                    result = clf.predict(image_path)
+                    ts = datetime.utcnow().isoformat()
+                    lat = latest_pos["lat"] if latest_pos else ""
+                    lon = latest_pos["lon"] if latest_pos else ""
+                    abs_alt = latest_pos["abs_alt"] if latest_pos else ""
+                    rel_alt = latest_pos["rel_alt"] if latest_pos else ""
+                    # log to CSV
+                    with open(OUTPUT_CSV, "a", newline="") as f:
+                        writer = csv.writer(f)
+                        writer.writerow([ts, image_path, lat, lon, abs_alt, rel_alt, last_progress, mission_total, result["index"], result["confidence"]])
+                    logger.info(f"Saved result for {image_path} -> {result}")
+                    main.captured_at_progress = last_progress
+
+            await asyncio.sleep(0.2)
+
+    except asyncio.CancelledError:
+        logger.info("Main cancelled")
+    finally:
+        await pix.close()
+        img.close()
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
