@@ -29,7 +29,7 @@ async def main():               # Main async function
     prog_task = asyncio.create_task(pix.subscribe_mission_progress(prog_queue))     # Subscribe to mission progress updates
 
     # Initialize camera & classifier
-    img = ImageCapture(out_dir=IMAGE_DIR)                               # Initialize camera
+    img = ImageCapture(output_dir=IMAGE_DIR)                               # Initialize camera
     clf = TFLiteClassifier(MODEL_PATH, input_size=(224,224))            # Initialize TFLite classifier
 
     # Ensure classification CSV exists

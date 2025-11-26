@@ -74,7 +74,7 @@ class FlightMetricsLogger:
                 pass
 
             if self.latest_pos and self.latest_imu:                     # Ensure we have data
-            # Metrics: Altitude Stability
+                # Metrics: Altitude Stability
                 self.alt_window.append(self.latest_pos["rel_alt"])      # Relative altitude
                 if len(self.alt_window) > self.window_size:             # If window is full
                     self.alt_window.pop(0)                              # Remove oldest entry
@@ -85,13 +85,13 @@ class FlightMetricsLogger:
 
                 alt_stab = stdev(self.alt_window) if len(self.alt_window) > 1 else 0.0
 
-            # Metrics: Vibration / IMU Acceleration RMS
+                # Metrics: Vibration / IMU Acceleration RMS
                 vib_rms = sqrt(self.latest_imu["x"]**2 + self.latest_imu["y"]**2 + self.latest_imu["z"]**2) # Vibration RMS
                 self.vib_window.append(vib_rms)                         # Vibration RMS
                 if len(self.vib_window) > self.window_size:             # If window is full
                     self.vib_window.pop(0)                              # Remove oldest entry   
 
-            # Metrics: Position Jitter During Hover
+                # Metrics: Position Jitter During Hover
                 if len(self.pos_window) > 1:
                     mean_x = sum(p[0] for p in self.pos_window)/len(self.pos_window)    # Mean latitude
                     mean_y = sum(p[1] for p in self.pos_window)/len(self.pos_window)    # Mean longitude
@@ -100,11 +100,11 @@ class FlightMetricsLogger:
                 else:
                     jitter = 0.0
 
-            # Metrics: Flight Endurance
+                # Metrics: Flight Endurance
                 battery_pct = self.latest_batt["percentage"] if self.latest_batt else 0.0   # Battery percentage
                 flight_time = (datetime.utcnow() - self.flight_start).total_seconds() if self.flight_start else 0.0   # Flight time in seconds
 
-            # Record metrics to CSV
+                # Record metrics to CSV
                 with open(self.output_csv, "a", newline="") as f:   # Append to CSV
                     writer = csv.writer(f)                          # Create writer
                     writer.writerow([                               # Write metrics row
