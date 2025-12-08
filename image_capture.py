@@ -4,21 +4,22 @@ from datetime import datetime
 import logging
 import pathlib
 
-logger = logging.getLogger("ImageCapture")  # Create logger for ImageCapture
+# Create logger for ImageCapture
+logger = logging.getLogger("ImageCapture")
 
 class ImageCapture:
-    def __init__(self, output_dir=None, keep_preview=False):     # Initialize camera
+    def __init__(self, output_dir=None, keep_preview=False):
         if output_dir is None:
             import config
             output_dir = str(config.IMAGE_DIR)
-        self.output_dir = pathlib.Path(output_dir)              # Output directory
-        self.output_dir.mkdir(parents=True, exist_ok=True)      # Ensure directory existS
+        self.output_dir = pathlib.Path(output_dir)
+        self.output_dir.mkdir(parents=True, exist_ok=True)
 
         try:
-            self.picam2 = Picamera2()                               # Initialize Picamera2   
-            cam_config = self.picam2.create_still_configuration(main={"size": (4056, 3040)})    # Full V3 resolution
-            self.picam2.configure(cam_config)                           # Configure for still images
-            self.picam2.start()                                     # Start the camera
+            self.picam2 = Picamera2()
+            cam_config = self.picam2.create_still_configuration(main={"size": (4056, 3040)})
+            self.picam2.configure(cam_config)
+            self.picam2.start()
             logger.info("Camera started successfully.")
         except Exception as e:
             logger.error(f"Failed to initialize camera: {e}")
