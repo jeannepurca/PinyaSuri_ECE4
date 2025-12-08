@@ -22,7 +22,7 @@ class PixhawkInterface:
         async def wait_for_connection():
             async for state in self.drone.core.connection_state():
                 if state.is_connected:
-                    logger.info("Pixhawk connected.")
+                    logger.info("✓ Pixhawk connected.")
                     self._connected.set()
                     return
 

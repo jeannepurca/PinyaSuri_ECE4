@@ -271,25 +271,32 @@ async def main():
     loop = asyncio.get_event_loop()
     
     # Initialize system
-    logger.info("=== PinyaSuri System Starting ===")
+    logger.info("=" * 60)
+    logger.info("WELCOME TO PINYASURI SYSTEM")
+    logger.info("=" * 60)
+
     if not await system.initialize():
-        logger.error("System initialization failed. Exiting.")
+        logger.error("✗ System initialization failed. Exiting.")
         return 1
     
-    logger.info("=== All systems initialized ===")
+    logger.info("=" * 60)
+    logger.info("✓ ALL SYSTEMS INITIALIZED SUCCESSFULLY!")
+    logger.info("=" * 60)
     
     # Run mission
     try:
         await system.run_mission()
     except KeyboardInterrupt:
-        logger.info("Interrupted by user")
+        logger.info("⚠ Interrupted by user!")
     except Exception as e:
-        logger.error(f"Unexpected error: {e}", exc_info=True)
+        logger.error(f"✗ Unexpected error: {e}", exc_info=True)
         return 1
     finally:
         await system.shutdown()
     
-    logger.info("=== PinyaSuri System Stopped ===")
+    logger.info("=" * 60)
+    logger.info("PINYASURI SYSTEM STOPPED")
+    logger.info("=" * 60)
     return 0
 
 

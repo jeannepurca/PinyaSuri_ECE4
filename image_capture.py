@@ -20,9 +20,9 @@ class ImageCapture:
             cam_config = self.picam2.create_still_configuration(main={"size": (4056, 3040)})
             self.picam2.configure(cam_config)
             self.picam2.start()
-            logger.info("Camera started successfully.")
+            logger.info("✓ Camera started successfully.")
         except Exception as e:
-            logger.error(f"Failed to initialize camera: {e}")
+            logger.error(f"✗ Failed to initialize camera: {e}")
             raise
 
     # Capture Image and Save to File
