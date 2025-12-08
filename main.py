@@ -6,7 +6,6 @@ import signal
 import sys
 
 from datetime import datetime
-from logging
 from typing import Optional
 from pathlib import Path
 from mavsdk import System

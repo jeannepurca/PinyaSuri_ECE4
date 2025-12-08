@@ -2,6 +2,7 @@ import os
 from picamera2 import Picamera2
 from datetime import datetime
 import logging
+import pathlib
 
 logger = logging.getLogger("ImageCapture")  # Create logger for ImageCapture
 
@@ -10,11 +11,13 @@ class ImageCapture:
         if output_dir is None:
             import config
             output_dir = str(config.IMAGE_DIR)
+        self.output_dir = pathlib.Path(output_dir)              # Output directory
+        self.output_dir.mkdir(parents=True, exist_ok=True)      # Ensure directory existS
 
         try:
             self.picam2 = Picamera2()                               # Initialize Picamera2   
-            config = self.picam2.create_still_configuration(main={"size": (4056, 3040)})    # Full V3 resolution
-            self.picam2.configure(config)                           # Configure for still images
+            cam_config = self.picam2.create_still_configuration(main={"size": (4056, 3040)})    # Full V3 resolution
+            self.picam2.configure(cam_config)                           # Configure for still images
             self.picam2.start()                                     # Start the camera
             logger.info("Camera started successfully.")
         except Exception as e:
