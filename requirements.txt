@@ -17,7 +17,3 @@ numpy>=1.21.0
 # Optional but recommended
 # For better async support
 aiofiles
-
-# For data analysis (optional)
-# pandas
-# matplotlib

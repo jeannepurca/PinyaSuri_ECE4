@@ -25,7 +25,7 @@ CLASS_NAMES = {
     0: "Healthy",
     1: "Mealybug Wilt Disease",
     2: "Root Rot Disease",
-    3: "Crown Rot",
+    3: "Crown Rot Disease",
     4: "Fruit Fasciation Disorder",
     5: "Multiple Crown Disorder"
 }
