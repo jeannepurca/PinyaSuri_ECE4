@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import asyncio
 import logging
 import csv
@@ -267,19 +269,6 @@ async def main():
     
     # Setup signal handlers for graceful shutdown
     loop = asyncio.get_event_loop()
-    
-
-    def signal_handler():
-        logger.info("Received shutdown signal")
-        asyncio.create_task(system.shutdown())
-    
-    # Register signal handlers (Unix-like systems)
-    try:
-        loop.add_signal_handler(signal.SIGINT, signal_handler)
-        loop.add_signal_handler(signal.SIGTERM, signal_handler)
-    except NotImplementedError:
-        # Windows doesn't support add_signal_handler
-        pass
     
     # Initialize system
     logger.info("=== PinyaSuri System Starting ===")
