@@ -43,6 +43,8 @@ async def main():               # Main async function
 
     last_progress = -1                  # Last mission progress
     latest_pos = None                   # Latest position
+    captured_at_progress = -1           # Track which waypoint we last captured at
+    mission_total = 0                   # Total mission items
 
     # Initialize flight metrics logger
     metrics_logger = FlightMetricsLogger(pix)
@@ -51,7 +53,7 @@ async def main():               # Main async function
     try:
         while True:
 
-            # Mission progress updates
+            # Mission progress updates - drain queue to get latest
             try:                        # Try to get mission progress
                 while True:             # get latest mission progress
                     prog = prog_queue.get_nowait()      # Non-blocking get
@@ -61,7 +63,7 @@ async def main():               # Main async function
             except asyncio.QueueEmpty:
                 pass
 
-            # Latest position
+            # Latest position - drain queue to get latest
             try:                        # Try to get position
                 while True:             # get latest position
                     p = pos_queue.get_nowait()          # Non-blocking get
@@ -69,41 +71,58 @@ async def main():               # Main async function
             except asyncio.QueueEmpty:
                 pass
 
+            # Capture image at each new waypoint
             if last_progress >= 0:      # Valid mission progress
-                if not hasattr(main, "captured_at_progress"):       # Initialize capture state
-                    main.captured_at_progress = -1                  # No captures yet
-
-                if last_progress != main.captured_at_progress:      # New mission item
+                if last_progress != captured_at_progress:      # New mission item
                     logger.info(f"Waypoint reached (index {last_progress}). Capturing image...")    # Log waypoint reached
-                    image_path = img.capture(prefix=f"wp{last_progress}")                           # Capture image
                     
-                    # Run classification
-                    result = clf.predict(image_path)                      # Predict classification
-                    ts = datetime.utcnow().isoformat()                    # Timestamp
-                    lat = latest_pos["lat"] if latest_pos else ""         # Latitude
-                    lon = latest_pos["lon"] if latest_pos else ""         # Longitude
-                    abs_alt = latest_pos["abs_alt"] if latest_pos else "" # Absolute altitude
-                    rel_alt = latest_pos["rel_alt"] if latest_pos else "" # Relative altitude
+                    try:
+                        # Capture image
+                        image_path = img.capture(prefix=f"wp{last_progress}")                           # Capture image
+                        
+                        # Run classification
+                        result = clf.predict(image_path)                      # Predict classification
+                        ts = datetime.utcnow().isoformat()                    # Timestamp
+                        lat = latest_pos["lat"] if latest_pos else ""         # Latitude
+                        lon = latest_pos["lon"] if latest_pos else ""         # Longitude
+                        abs_alt = latest_pos["abs_alt"] if latest_pos else "" # Absolute altitude
+                        rel_alt = latest_pos["rel_alt"] if latest_pos else "" # Relative altitude
+                        
+                        # Log to CSV
+                        with open(OUTPUT_CSV, "a", newline="") as f:
+                            writer = csv.writer(f)
+                            writer.writerow([
+                                ts, image_path, lat, lon, abs_alt, rel_alt,
+                                last_progress, mission_total, result["index"], result["confidence"]
+                            ])
+                        logger.info(f"Saved result for {image_path} -> {result}")
+                        
+                    except Exception as e:
+                        logger.error(f"Error processing waypoint {last_progress}: {e}")
                     
-                    # Log to CSV
-                    with open(OUTPUT_CSV, "a", newline="") as f:
-                        writer = csv.writer(f)
-                        writer.writerow([
-                            ts, image_path, lat, lon, abs_alt, rel_alt,
-                            last_progress, mission_total, result["index"], result["confidence"]
-                        ])
-                    logger.info(f"Saved result for {image_path} -> {result}")
-                    main.captured_at_progress = last_progress
+                    finally:
+                        captured_at_progress = last_progress    # Update tracked waypoint
 
             await asyncio.sleep(0.2)
 
+    except KeyboardInterrupt:               # Handle user interruption
+        logger.info("Interrupted by user")  # Log interruption
     except asyncio.CancelledError:          # Handle cancellation
         logger.info("Main cancelled")       # Log cancellation
+    except Exception as e:                  # Handle unexpected errors
+        logger.error(f"Unexpected error: {e}", exc_info=True)
     finally:                                # Cleanup
+        logger.info("Shutting down...")
+        pos_task.cancel()                   # Cancel position subscription
+        prog_task.cancel()                  # Cancel progress subscription
+        metrics_task.cancel()               # Cancel metrics logging
+        
+        # Wait for tasks to complete
+        await asyncio.gather(pos_task, prog_task, metrics_task, return_exceptions=True)
+        
         await pix.close()                   # Close Pixhawk interface
         img.close()                         # Close image interface
-        metrics_task.cancel()               # Cancel metrics logging
-        await asyncio.sleep(0.2)            # Allow tasks to finish
+        logger.info("Shutdown complete")
 
 if __name__ == "__main__":                  # Run main if executed as script
     asyncio.run(main())                     # Run main async

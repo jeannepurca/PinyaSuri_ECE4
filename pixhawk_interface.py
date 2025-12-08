@@ -1,3 +1,7 @@
+"""
+Pixhawk Interface using MAVSDK
+"""
+
 import asyncio
 import logging
 from mavsdk import System
@@ -78,4 +82,6 @@ class PixhawkInterface: # Interface for Pixhawk using MAVSDK
                 self.takeoff_time = asyncio.get_event_loop().time()     # Set takeoff time
 
     async def close(self):                      # Close connection
+        logger.info("Closing Pixhawk connection...")
         self._stop = True                       # Set stop flag
+        await asyncio.sleep(0.1)                # Allow subscriptions to process stop flag

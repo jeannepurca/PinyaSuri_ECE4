@@ -1,3 +1,7 @@
+"""
+Flight Metrics Logger
+"""
+
 import asyncio
 import csv
 import os

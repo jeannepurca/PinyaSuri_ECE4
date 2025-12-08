@@ -1,3 +1,7 @@
+"""
+Image Capture
+"""
+
 import os
 from picamera2 import Picamera2
 from datetime import datetime
@@ -10,12 +14,16 @@ class ImageCapture:
     def __init__(self, output_dir="/home/ece4/PINYASURI/drone_images", keep_preview=False):     # Initialize camera
         self.output_dir = pathlib.Path(output_dir)              # Output directory
         self.output_dir.mkdir(parents=True, exist_ok=True)      # Ensure directory exists
-        self.picam2 = Picamera2()                               # Initialize Picamera2   
-
-        config = self.picam2.create_still_configuration(main={"size": (4056, 3040)})    # Full V3 resolution
-        self.picam2.configure(config)                           # Configure for still images
-        self.picam2.start()                                     # Start the camera
-        logger.info("Camera started.")                                  
+        
+        try:
+            self.picam2 = Picamera2()                               # Initialize Picamera2   
+            config = self.picam2.create_still_configuration(main={"size": (4056, 3040)})    # Full V3 resolution
+            self.picam2.configure(config)                           # Configure for still images
+            self.picam2.start()                                     # Start the camera
+            logger.info("Camera started successfully.")
+        except Exception as e:
+            logger.error(f"Failed to initialize camera: {e}")
+            raise
 
     def capture(self, prefix="img"):                            # Capture an image
         ts = datetime.utcnow().strftime("%Y%m%dT%H%M%S%f")[:-3]     # UTC timestamp for filename
@@ -28,5 +36,6 @@ class ImageCapture:
     def close(self):
         try:                                                    # Try to stop the camera
             self.picam2.stop()                                  # Stop the camera
-        except Exception:                                       # Ignore errors on stop
-            pass                                                # Suppress exceptions on stop
+            logger.info("Camera stopped successfully.")
+        except Exception as e:                                  # Handle errors on stop
+            logger.warning(f"Error stopping camera: {e}")      # Log warning but don't raise
