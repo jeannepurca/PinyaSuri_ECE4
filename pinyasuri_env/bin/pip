@@ -1,4 +1,4 @@
-#!/home/ece4/pinyasuri_env/bin/python3
+#!/home/ece4/PinyaSuri_ECE4/pinyasuri_env/bin/python3
 # -*- coding: utf-8 -*-
 import re
 import sys
