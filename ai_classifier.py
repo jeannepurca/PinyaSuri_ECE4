@@ -1,12 +1,10 @@
-"""
-AI Classifier of PinyaSuri
-"""
-
 import numpy as np
 from PIL import Image
 import tflite_runtime.interpreter as tflite
 import logging
 
+# Configure Logging
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("Classifier")    # Create logger for Classifier  
 
 class TFLiteClassifier:

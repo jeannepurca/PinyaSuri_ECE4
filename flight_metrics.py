@@ -1,7 +1,3 @@
-"""
-Flight Metrics Logger
-"""
-
 import asyncio
 import csv
 import os
@@ -10,20 +6,24 @@ from statistics import stdev
 import logging
 from datetime import datetime
 
-logger = logging.getLogger("FlightMetrics")     # Create logger for FlightMetrics
+# Configure Logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("FlightMetrics")
 
 class FlightMetricsLogger:
-    def __init__(self, pixhawk, output_csv="/home/ece4/PINYASURI/drone_flight_metrics.csv",
-                 window_size=10, log_interval=0.5):
-        self.pixhawk = pixhawk                  # Pixhawk interface
-        self.output_csv = output_csv            # Output CSV file path
-        self.window_size = window_size          # Rolling window size
-        self.log_interval = log_interval        # Logging interval in seconds
-        self.alt_window = []                    # Rolling window for altitude
-        self.pos_window = []                    # Rolling window for position
-        self.vib_window = []                    # Rolling window for vibration
+    def __init__(self, pixhawk, output_csv=None, window_size=10, log_interval=0.5):
+        if output_csv is None:
+            import config
+            output_csv = str(config.FLIGHT_METRICS_CSV)
+        self.pixhawk = pixhawk                  
+        self.output_csv = output_csv            
+        self.window_size = window_size         
+        self.log_interval = log_interval
+        self.alt_window = []                    
+        self.pos_window = []                    
+        self.vib_window = []              
 
-        # create CSV if doesn't exist
+        # Create CSV (if doesn't exist)
         if not os.path.exists(self.output_csv): 
             with open(self.output_csv, "w", newline="") as f:
                 writer = csv.writer(f)
@@ -33,7 +33,7 @@ class FlightMetricsLogger:
                     "battery_pct","flight_time_s"
                 ])
 
-        # queues
+        # Queues
         self.pos_queue = asyncio.Queue()        # Queue for position data
         self.imu_queue = asyncio.Queue()        # Queue for IMU data
         self.battery_queue = asyncio.Queue()    # Queue for battery data
@@ -45,12 +45,6 @@ class FlightMetricsLogger:
         self.flight_start = None                # Flight start time
 
     async def run(self):
-        # subscribe to Pixhawk streams
-        asyncio.create_task(self.pixhawk.subscribe_positions(self.pos_queue))   # Position data
-        asyncio.create_task(self.pixhawk.subscribe_imu_accel(self.imu_queue))   # IMU data
-        asyncio.create_task(self.pixhawk.subscribe_battery(self.battery_queue)) # Battery data
-        asyncio.create_task(self.pixhawk.subscribe_armed(self.armed_queue))     # Armed status
-
         while True:
             # Update latest data from queues
             try:
@@ -123,4 +117,4 @@ class FlightMetricsLogger:
                         battery_pct,                                # Battery percentage
                         flight_time                                 # Flight time in seconds
                     ])
-            await asyncio.sleep(self.log_interval)                  # Wait before next log
+            await asyncio.sleep(self.log_interval)
