@@ -11,7 +11,7 @@ CLASSIFICATION_CSV = LOG_DIR / "ai_classifications.csv"
 FLIGHT_METRICS_CSV = LOG_DIR / "drone_flight_metrics.csv"
 
 # Pixhawk Configuration
-PIXHAWK_ADDRESS = "tcp://192.168.1.14:5760"
+PIXHAWK_ADDRESS = "serial:///dev/ttyAMA0:57600"
 CONNECTION_TIMEOUT = 30
 
 # Model Configuration
