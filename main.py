@@ -7,14 +7,12 @@ import sys
 from datetime import datetime
 from typing import Optional
 from pathlib import Path
-from mavsdk import System
 
 import config
-
 from pixhawk_interface import PixhawkInterface
-from flight_metrics import FlightMetricsLogger
+from flight_metrics import FlightMetrics
 from image_capture import ImageCapture
-from ai_classifier import TFLiteClassifier
+from ai_classifier import Classifier
 
 # Ensure directories exist before logging
 config.ensure_directories()
@@ -30,30 +28,30 @@ logging.basicConfig(
 )
 logger = logging.getLogger("PinyaSuri")
 
-# Configuration Constants
-class PinyaSuriSystem:
+
+class PinyaSuri:
     """Main system coordinator for PinyaSuri"""
 
     def __init__(self):
         self.pixhawk: Optional[PixhawkInterface] = None
         self.camera: Optional[ImageCapture] = None
-        self.classifier: Optional[TFLiteClassifier] = None
-        self.metrics_logger: Optional[FlightMetricsLogger] = None
+        self.classifier: Optional[Classifier] = None
+        self.metrics_logger: Optional[FlightMetrics] = None
         self.shutdown_event = asyncio.Event()
-
+        self._capture_lock = asyncio.Lock()
 
     async def initialize(self, max_retries: int = 3) -> bool:
-        """Initialize all system components with retry logic""" 
+        """Initialize system components (Pixhawk, Camera, AI, CSV, Metrics)""" 
 
         config.ensure_directories()
         
         # Initialize Pixhawk
         for attempt in range(1, max_retries + 1):
             try:
-                logger.info(f"》 Initializing Pixhawk (attempt {attempt}/{max_retries})...")
+                logger.info(f"》》》 Initializing Pixhawk (attempt {attempt}/{max_retries})...")
                 self.pixhawk = PixhawkInterface(system_address=config.PIXHAWK_ADDRESS)
                 await self.pixhawk.connect(timeout=config.CONNECTION_TIMEOUT)
-                logger.info("✓ Pixhawk connected successfully")
+                logger.info("✓ Pixhawk connected successfully.")
                 break
             except Exception as e:
                 logger.error(f"✗ Pixhawk connection failed: {e}")
@@ -64,41 +62,44 @@ class PinyaSuriSystem:
 
         # Initialize Camera
         try:
-            logger.info("》 Initializing Camera...")
+            logger.info("》》》 Initializing Camera...")
             self.camera = ImageCapture(
                 output_dir=str(config.IMAGE_DIR)
             )
-            logger.info("✓ Camera initialized successfully")
+            logger.info("✓ Camera initialized successfully.")
         except Exception as e:
             logger.error(f"✗ Camera initialization failed: {e}")
             return False
         
         # Initialize AI Classifier
         try:
-            logger.info("》 Loading AI Model...")
-            self.classifier = TFLiteClassifier(
+            logger.info("》》》 Loading AI Model...")
+            self.classifier = Classifier(
                 model_path=str(config.MODEL_PATH),
                 input_size=config.MODEL_INPUT_SIZE
             )
-            logger.info("✓ AI Model loaded successfully")
+            logger.info("✓ AI Model loaded successfully.")
         except Exception as e:
             logger.error(f"✗ AI Model loading failed: {e}")
             return False
-        
+
         # Initialize CSV for Classification Results
         self._initialize_classification_csv()
 
         # Initialize Flight Metrics Logger
-        self.metrics_logger = FlightMetricsLogger(
+        self.metrics_logger = FlightMetrics(
             self.pixhawk,
             output_csv=str(config.FLIGHT_METRICS_CSV)
         )
 
+        # Request mission count from Pixhawk (for Mission Planner missions)
+        await self.pixhawk.request_mission_count()
+        await asyncio.sleep(1)
+
         return True
 
-
     def _initialize_classification_csv(self):
-        """Create classification CSV with headers (if it doesn't exist)"""
+        """Create CSV for AI outputs"""
 
         if not config.CLASSIFICATION_CSV.exists():
             header = [
@@ -112,7 +113,6 @@ class PinyaSuriSystem:
                 writer.writerow(header)
             logger.info(f"》 Created classification log: {config.CLASSIFICATION_CSV}")
     
-
     async def run_mission(self):
         """Main mission loop: monitor progress and capture/classify images"""
         
@@ -122,17 +122,17 @@ class PinyaSuriSystem:
         imu_queue = asyncio.Queue()
         battery_queue = asyncio.Queue()
         armed_queue = asyncio.Queue()
-        in_air_queue = asyncio.Queue()
+        mode_queue = asyncio.Queue()
         
-        # Start Subscriptions
+        # Start Telemetry Subscriptions
         pos_task = asyncio.create_task(self.pixhawk.subscribe_positions(pos_queue))
         prog_task = asyncio.create_task(self.pixhawk.subscribe_mission_progress(prog_queue))
         imu_task = asyncio.create_task(self.pixhawk.subscribe_imu_accel(imu_queue))
         batt_task = asyncio.create_task(self.pixhawk.subscribe_battery(battery_queue))
         armed_task = asyncio.create_task(self.pixhawk.subscribe_armed(armed_queue))
-        in_air_task = asyncio.create_task(self.pixhawk.subscribe_in_air(in_air_queue))
-        
-        # Pass queues to metrics logger instead of creating new ones
+        mode_task = asyncio.create_task(self.pixhawk.subscribe_flight_mode(mode_queue))
+
+        # Pass queues to metrics logger
         self.metrics_logger.pos_queue = pos_queue
         self.metrics_logger.imu_queue = imu_queue
         self.metrics_logger.battery_queue = battery_queue
@@ -140,94 +140,132 @@ class PinyaSuriSystem:
 
         metrics_task = asyncio.create_task(self.metrics_logger.run())
 
-        # Mission State
+        # Mission State Variables
         last_progress = -1
-        captured_at_progress = 0        # Start from 1 (skip WP0 takeoff point)
+        captured_waypoints = set()
         latest_pos = None
         mission_total = 0
+        is_armed = False
         mission_started = False
-        mission_completed = False
-        has_landed = False
+        was_armed_before = False
+        current_flight_mode = "UNKNOWN"
+
+        # DEBUG: Counters
+        progress_update_count = 0
+        position_update_count = 0
+        mode_update_count = 0
         
         logger.info("=" * 60)
         logger.info("🍍 PINYASURI SYSTEM READY! 🚁")
-        logger.info("Waiting for drone to take off...")
+        logger.info("Waiting for drone to arm...")
         logger.info("=" * 60)
-        
+
         try:
             while not self.shutdown_event.is_set():
 
-                # Process In-Air Status (Wait for takeoff)
+                # Process Armed Status
                 try:
                     while True:
-                        in_air = in_air_queue.get_nowait()
-                        if in_air and not mission_started:
+                        armed_data = armed_queue.get_nowait()
+                        is_armed = armed_data["armed"]
+                        logger.debug(f"🔧 DEBUG: Armed status - {is_armed}")
+                        
+                        # Start monitoring when armed
+                        if is_armed and not mission_started:
                             mission_started = True
+                            was_armed_before = True
                             logger.info("=" * 60)
-                            logger.info("🛫 DRONE IN AIR - Mission monitoring started.")
+                            logger.info("🛫 DRONE ARMED - Mission monitoring started.")
                             logger.info("=" * 60)
 
-                        # Check for landing after mission completion
-                        if mission_completed and not in_air and not has_landed:
-                            has_landed = True
+                        # Detect disarm after mission (landing)
+                        if was_armed_before and not is_armed:
                             logger.info("=" * 60)
-                            logger.info("🛬 DRONE LANDED - Shutting down in 5 seconds...")
+                            logger.info("🛬 DRONE DISARMED - Mission complete.")
+                            logger.info(f"》 DEBUG: Total progress updates: {progress_update_count}")
+                            logger.info(f"》 DEBUG: Total position updates: {position_update_count}")
+                            logger.info(f"》 DEBUG: Captured waypoints: {sorted(captured_waypoints)}")
+                            logger.info("》》》 Shutting down in 5 seconds...")
                             logger.info("=" * 60)
-                            await asyncio.sleep(5)          # Grace period for final logs
+                            await asyncio.sleep(5)
                             self.shutdown_event.set()
                 except asyncio.QueueEmpty:
                     pass
-                
-                # Only process mission if drone is airborne
+            
+                # Process Position Updates
+                try:
+                    while True:
+                        latest_pos = pos_queue.get_nowait()
+                        position_update_count += 1
+                except asyncio.QueueEmpty:
+                    pass
+            
+                # Process Flight Mode Updates
+                try:
+                    while True:
+                        mode = mode_queue.get_nowait()
+                        mode_update_count += 1
+                        if mode != current_flight_mode:
+                            current_flight_mode = mode
+                            logger.info(f"》 Flight Mode: {mode}")
+                except asyncio.QueueEmpty:
+                    pass
+
+                # Only process mission if armed
                 if not mission_started:
                     await asyncio.sleep(config.MAIN_LOOP_INTERVAL)
                     continue
 
-                # Drain Mission Progress Queue
+                # Process Mission Progress Updates
                 try:
                     while True:
                         prog = prog_queue.get_nowait()
-                        last_progress = prog["current"]
+                        progress_update_count += 1
+                        current_waypoint = prog["current"]
                         mission_total = prog["total"]
-                        logger.info(f"》 Mission Progress: Waypoint {last_progress}/{mission_total}")
                         
-                        # Check if mission completed (reached last waypoint)
-                        if mission_total > 0 and last_progress == mission_total:
-                            if not mission_completed:
-                                mission_completed = True
-                                logger.info("=" * 60)
-                                logger.info("🎯 MISSION COMPLETED - All waypoints visited")
-                                logger.info("Waiting for drone to return and land...")
-                                logger.info("=" * 60)
+                        # Only process if waypoint changed
+                        if current_waypoint != last_progress:
+                            logger.info(f"》 Mission Progress: Waypoint {current_waypoint}/{mission_total}")
+                            last_progress = current_waypoint
+                            
+                            # Capture image if this waypoint hasn't been processed yet
+                            if current_waypoint > 0 and current_waypoint not in captured_waypoints:
+                                # Use lock to prevent duplicate captures
+                                async with self._capture_lock:
+                                    if current_waypoint not in captured_waypoints:
+                                        logger.info(f"》 NEW WAYPOINT: {current_waypoint} - Capturing")
+                                        
+                                        # Wait briefly for position to stabilize
+                                        await asyncio.sleep(0.2)
+                                        
+                                        # Get most recent position
+                                        capture_pos = latest_pos
+                                        
+                                        await self._process_waypoint(
+                                            current_waypoint,
+                                            mission_total,
+                                            capture_pos
+                                        )
+                                        captured_waypoints.add(current_waypoint)
+                            else:
+                                logger.debug(f"》 Waypoint {current_waypoint} already captured.")
+                        
                 except asyncio.QueueEmpty:
                     pass
-                
-                # Drain Position Queue
-                try:
-                    while True:
-                        latest_pos = pos_queue.get_nowait()
-                except asyncio.QueueEmpty:
-                    pass
-                
-                # Process New Waypoint (skip WP0)
-                if last_progress > 0 and last_progress != captured_at_progress:
-                    await self._process_waypoint(
-                        last_progress, 
-                        mission_total, 
-                        latest_pos
-                    )
-                    captured_at_progress = last_progress
                 
                 await asyncio.sleep(config.MAIN_LOOP_INTERVAL)
         
+        except Exception as e:
+            logger.error(f"✗ Error in mission loop: {e}", exc_info=True)
+        
         finally:
-            # Cleanup
-            logger.info("》 Stopping mission tasks...")
-
-            for task in [pos_task, prog_task, imu_task, batt_task, armed_task, in_air_task, metrics_task]:
+            # Cleanup Tasks
+            logger.info("》》》 Stopping mission tasks...")
+            for task in [pos_task, prog_task, imu_task, batt_task, armed_task, mode_task, metrics_task]:
                 task.cancel()
             await asyncio.gather(
-                pos_task, prog_task, imu_task, batt_task, armed_task, in_air_task, metrics_task, 
+                pos_task, prog_task, imu_task, batt_task, armed_task, mode_task, metrics_task, 
                 return_exceptions=True
             )
 
@@ -235,13 +273,13 @@ class PinyaSuriSystem:
         """Capture image and run classification at a waypoint"""
 
         logger.info("=" * 60)
-        logger.info(f"📸 Waypoint {waypoint_idx} reached. Processing...")
+        logger.info(f"📸 WAYPOINT {waypoint_idx} REACHED - Processing...")
         logger.info("=" * 60)  
 
         try:
             # Capture Image
             image_path = self.camera.capture(prefix=f"wp{waypoint_idx}")
-            logger.info(f"》 Image captured: {image_path}")
+            logger.info(f"✓ Image captured: {image_path}")
             
             # Run AI Classification
             result = self.classifier.predict(image_path)
@@ -268,11 +306,10 @@ class PinyaSuriSystem:
                 logger.info(f"  Location: {lat:.6f}°, {lon:.6f}°")
                 logger.info(f"  Altitude: {rel_alt:.1f}m (relative), {abs_alt:.1f}m (absolute)")
             
-            logger.info(f"✓ Waypoint {waypoint_idx} processed successfully")
+            logger.info(f"✓ Waypoint {waypoint_idx} processed successfully.")
             
         except Exception as e:
             logger.error(f"✗ Error processing waypoint {waypoint_idx}: {e}", exc_info=True)
-
 
     async def shutdown(self):
         """Graceful shutdown of all components"""
@@ -286,7 +323,7 @@ class PinyaSuriSystem:
         if self.camera:
             self.camera.close()
         
-        logger.info("✓ Shutdown complete")
+        logger.info("✓ Shutdown complete.")
 
 
 async def main():
@@ -305,8 +342,8 @@ async def main():
     
     logger.info("=" * 60)
     logger.info("✓ ALL SYSTEMS INITIALIZED SUCCESSFULLY!")
-    logger.info("System will start monitoring once drone takes off")
-    logger.info("Press Ctrl+C to stop manually at any time")
+    logger.info("System will start monitoring once drone is armed.")
+    logger.info("Press Ctrl+C to stop manually at any time.")
     logger.info("=" * 60)
     
     # Run Mission

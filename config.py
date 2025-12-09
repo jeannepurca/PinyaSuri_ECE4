@@ -4,14 +4,14 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent
 LOG_DIR = BASE_DIR / "logs"
 IMAGE_DIR = BASE_DIR / "images"
-RAW_IMG_DIR = IMAGE_DIR / "raw"
+TEST_IMAGE_DIR = IMAGE_DIR / "test"
 
 # CSV Output Files
 CLASSIFICATION_CSV = LOG_DIR / "ai_classifications.csv"
 FLIGHT_METRICS_CSV = LOG_DIR / "drone_flight_metrics.csv"
 
 # Pixhawk Configuration
-PIXHAWK_ADDRESS = "serial:///dev/ttyAMA0:57600"
+PIXHAWK_ADDRESS = "tcp://192.168.1.14:5760"
 CONNECTION_TIMEOUT = 30
 
 # Model Configuration

@@ -7,7 +7,7 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("Classifier")    # Create logger for Classifier  
 
-class TFLiteClassifier:
+class Classifier:
     def __init__(self, model_path: str, input_size=(224,224)):              # Initialize TFLite model
         self.model_path = model_path                                        # Path to TFLite model
         self.input_size = input_size                                        # Expected input size for the model

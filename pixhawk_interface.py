@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from mavsdk import System
+from pymavlink import mavutil
 
 # Configure Logging
 logging.basicConfig(level=logging.INFO)        
@@ -12,10 +13,11 @@ class PixhawkInterface:
         self.drone = System()
         self._connected = asyncio.Event()
         self.takeoff_time = None
+        self.mavlink_connection = None
 
     # Connect to Pixhawk
     async def connect(self, timeout=30):        
-        logger.info(f"》 Connecting to Pixhawk: {self.system_address}")
+        logger.info(f"》》》 Connecting to Pixhawk: {self.system_address}")
         await self.drone.connect(system_address=self.system_address)
 
         async def wait_for_connection():
@@ -27,8 +29,28 @@ class PixhawkInterface:
 
         try:
             await asyncio.wait_for(wait_for_connection(), timeout=timeout)
+            await self._setup_mavlink_connection()
         except asyncio.TimeoutError:
             raise RuntimeError("⚠ Timeout waiting for Pixhawk connection.")
+
+    async def _setup_mavlink_connection(self):
+        """Setup direct MAVLink connection for raw message access"""
+        try:
+            # Extract connection string (convert serial path if needed)
+            conn_str = self.system_address.replace("serial://", "")
+            logger.info(f"》》》 Setting up MAVLink connection: {conn_str}")
+            
+            # Create MAVLink connection in a thread to avoid blocking
+            loop = asyncio.get_event_loop()
+            self.mavlink_connection = await loop.run_in_executor(
+                None, 
+                mavutil.mavlink_connection, 
+                conn_str
+            )
+            logger.info("✓ Direct MAVLink connection established.")
+        except Exception as e:
+            logger.warning(f"⚠ Could not establish direct MAVLink connection: {e}")
+            logger.warning("Will rely on MAVSDK telemetry only.")
 
     # Subscribe to Position Updates
     async def subscribe_positions(self, pos_queue: asyncio.Queue):
@@ -42,9 +64,69 @@ class PixhawkInterface:
             })
 
     # Subscribe to Mission Progress Updates
-    async def subscribe_mission_progress(self, prog_queue: asyncio.Queue):      
-        async for mp in self.drone.mission.mission_progress():
-            await prog_queue.put({"current": mp.current, "total": mp.total})
+    async def subscribe_mission_progress(self, prog_queue: asyncio.Queue):  
+        """
+        Subscribe to mission progress using MAVLink MISSION_CURRENT messages.
+        This works with Mission Planner missions.
+        """
+        if not self.mavlink_connection:
+            logger.error("⚠ No MAVLink connection available for mission tracking!")
+            logger.error("Mission progress will NOT be tracked!")
+            return
+        
+        last_seq = -1
+        mission_total = 0
+        
+        loop = asyncio.get_event_loop()
+        
+        try:
+            logger.info("》》》 Starting MAVLink mission progress listener...")
+            while True:
+                # Receive MAVLink message (non-blocking with timeout)
+                msg = await loop.run_in_executor(
+                    None,
+                    lambda: self.mavlink_connection.recv_match(
+                        type=['MISSION_CURRENT', 'MISSION_COUNT'], 
+                        blocking=True,
+                        timeout=0.5
+                    )
+                )
+                
+                if msg is None:
+                    await asyncio.sleep(0.05)
+                    continue
+                
+                # Handle MISSION_COUNT (total waypoints)
+                if msg.get_type() == 'MISSION_COUNT':
+                    mission_total = msg.count
+                    logger.info(f"》 Mission has {mission_total} total waypoints.")
+                
+                # Handle MISSION_CURRENT (current waypoint)
+                elif msg.get_type() == 'MISSION_CURRENT':
+                    current_seq = msg.seq
+                    
+                    if current_seq != last_seq:
+                        logger.info(f"》 MAVLink MISSION_CURRENT: Waypoint {current_seq}/{mission_total}")
+                        await prog_queue.put({
+                            "current": current_seq,
+                            "total": mission_total,
+                            "source": "mavlink"
+                        })
+                        last_seq = current_seq
+                
+                await asyncio.sleep(0.05)
+                
+        except asyncio.CancelledError:
+            logger.info("⚠ Mission progress listener cancelled.")
+            raise
+        except Exception as e:
+            logger.error(f"✗ Error in MAVLink mission listener: {e}", exc_info=True)
+
+    # Subscribe to Flight Mode Updates
+    async def subscribe_flight_mode(self, mode_queue: asyncio.Queue):
+        """Subscribe to flight mode changes"""
+        async for flight_mode in self.drone.telemetry.flight_mode():
+            await mode_queue.put(str(flight_mode))
 
     # Subscribe to IMU Accelerometer Data
     async def subscribe_imu_accel(self, imu_queue: asyncio.Queue):              
@@ -69,12 +151,28 @@ class PixhawkInterface:
     async def subscribe_armed(self, armed_queue: asyncio.Queue):
         async for a in self.drone.telemetry.armed():                            
             await armed_queue.put({"armed": a})     
-
             if a and self.takeoff_time is None:
                 self.takeoff_time = asyncio.get_event_loop().time()
 
-    # Subscribe to In-Air Status (NEW)
+    # Subscribe to In-Air Status
     async def subscribe_in_air(self, in_air_queue: asyncio.Queue):
         """Subscribe to in-air status - detects when drone is flying or landed"""
         async for in_air in self.drone.telemetry.in_air():
-            await in_air_queue.put(in_air)    
+            await in_air_queue.put(in_air)  
+
+    # Request Mission List (get total count)
+    async def request_mission_count(self):
+        """Request mission count from the autopilot"""
+        if self.mavlink_connection:
+            try:
+                loop = asyncio.get_event_loop()
+                await loop.run_in_executor(
+                    None,
+                    lambda: self.mavlink_connection.mav.mission_request_list_send(
+                        self.mavlink_connection.target_system,
+                        self.mavlink_connection.target_component
+                    )
+                )
+                logger.info("》 Requested mission count from Pixhawk")
+            except Exception as e:
+                logger.error(f"✗ Error requesting mission count: {e}")

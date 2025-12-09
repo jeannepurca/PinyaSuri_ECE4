@@ -10,7 +10,7 @@ from datetime import datetime
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("FlightMetrics")
 
-class FlightMetricsLogger:
+class FlightMetrics:
     def __init__(self, pixhawk, output_csv=None, window_size=10, log_interval=0.5):
         if output_csv is None:
             import config
