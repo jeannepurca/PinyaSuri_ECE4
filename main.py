@@ -9,12 +9,12 @@ from typing import Optional
 from pathlib import Path
 from mavsdk import System
 
+import config
+
 from pixhawk_interface import PixhawkInterface
 from flight_metrics import FlightMetricsLogger
 from image_capture import ImageCapture
 from ai_classifier import TFLiteClassifier
-
-import config
 
 # Ensure directories exist before logging
 config.ensure_directories()

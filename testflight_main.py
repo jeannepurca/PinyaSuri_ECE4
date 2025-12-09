@@ -8,10 +8,11 @@ from datetime import datetime
 from typing import Optional
 from pathlib import Path
 
+import config
+
 from pixhawk_interface import PixhawkInterface
 from image_capture import ImageCapture
 from flight_metrics import FlightMetricsLogger
-import config
 
 # Ensure directories exist before logging
 config.ensure_directories()
