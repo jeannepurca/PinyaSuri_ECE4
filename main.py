@@ -16,6 +16,9 @@ from ai_classifier import TFLiteClassifier
 
 import config
 
+# Ensure directories exist before logging
+config.ensure_directories()
+
 # Configure Logging
 logging.basicConfig(
     level=logging.INFO,

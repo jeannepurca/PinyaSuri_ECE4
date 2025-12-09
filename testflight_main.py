@@ -13,6 +13,9 @@ from image_capture import ImageCapture
 from flight_metrics import FlightMetricsLogger
 import config
 
+# Ensure directories exist before logging
+config.ensure_directories()
+
 # Configure Logging
 logging.basicConfig(
     level=logging.INFO,
