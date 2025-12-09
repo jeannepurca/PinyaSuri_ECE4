@@ -24,7 +24,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler(LOG_DIR / "flight.log"),
+        logging.FileHandler(config.LOG_DIR / "flight.log"),
         logging.StreamHandler()
     ]
 )
