@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+"""
+PinyaSuri Test Flight System - ARMED VERSION
+Uses armed status instead of in_air (more reliable)
+"""
 
 import asyncio
 import logging
@@ -9,7 +13,6 @@ from typing import Optional
 from pathlib import Path
 
 import config
-
 from pixhawk_interface import PixhawkInterface
 from image_capture import ImageCapture
 from flight_metrics import FlightMetricsLogger
@@ -40,13 +43,13 @@ class TestFlightSystem:
 
     async def initialize(self, max_retries: int = 3) -> bool:
         """Initialize system components with retry logic"""
-
+        
         config.ensure_directories()
         
         # Initialize Pixhawk
         for attempt in range(1, max_retries + 1):
             try:
-                logger.info(f"》 Initializing Pixhawk (attempt {attempt}/{max_retries})...")
+                logger.info(f"Initializing Pixhawk (attempt {attempt}/{max_retries})...")
                 self.pixhawk = PixhawkInterface(system_address=config.PIXHAWK_ADDRESS)
                 await self.pixhawk.connect(timeout=config.CONNECTION_TIMEOUT)
                 logger.info("✓ Pixhawk connected successfully")
@@ -54,13 +57,13 @@ class TestFlightSystem:
             except Exception as e:
                 logger.error(f"✗ Pixhawk connection failed: {e}")
                 if attempt == max_retries:
-                    logger.error("⚠ Maximum retry attempts reached for Pixhawk.")
+                    logger.error("Maximum retry attempts reached for Pixhawk.")
                     return False
                 await asyncio.sleep(2)
 
         # Initialize Camera
         try:
-            logger.info("》 Initializing Camera...")
+            logger.info("Initializing Camera...")
             self.camera = ImageCapture(output_dir=str(config.RAW_IMG_DIR))
             logger.info("✓ Camera initialized successfully")
         except Exception as e:
@@ -80,7 +83,6 @@ class TestFlightSystem:
 
     def _initialize_capture_log(self):
         """Create image capture log CSV with headers"""
-
         capture_log = config.LOG_DIR / "image_captures.csv"
         
         if not capture_log.exists():
@@ -92,7 +94,7 @@ class TestFlightSystem:
             with open(capture_log, "w", newline="") as f:
                 writer = csv.writer(f)
                 writer.writerow(header)
-            logger.info(f"》 Created image capture log: {capture_log}")
+            logger.info(f"Created image capture log: {capture_log}")
 
     async def run_mission(self):
         """Main mission loop: monitor progress and capture images at waypoints"""
@@ -103,7 +105,6 @@ class TestFlightSystem:
         imu_queue = asyncio.Queue()
         battery_queue = asyncio.Queue()
         armed_queue = asyncio.Queue()
-        in_air_queue = asyncio.Queue()
         
         # Start Telemetry Subscriptions
         pos_task = asyncio.create_task(self.pixhawk.subscribe_positions(pos_queue))
@@ -111,7 +112,6 @@ class TestFlightSystem:
         imu_task = asyncio.create_task(self.pixhawk.subscribe_imu_accel(imu_queue))
         batt_task = asyncio.create_task(self.pixhawk.subscribe_battery(battery_queue))
         armed_task = asyncio.create_task(self.pixhawk.subscribe_armed(armed_queue))
-        in_air_task = asyncio.create_task(self.pixhawk.subscribe_in_air(in_air_queue))
         
         # Pass queues to metrics logger
         self.metrics_logger.pos_queue = pos_queue
@@ -123,43 +123,46 @@ class TestFlightSystem:
 
         # Mission State Variables
         last_progress = -1
-        captured_at_progress = 0  # Start from 1 (skip WP0 takeoff point)
+        captured_at_progress = 0  # Start from 1 (skip WP0)
         latest_pos = None
         mission_total = 0
+        is_armed = False
         mission_started = False
-        mission_completed = False
-        has_landed = False
+        was_armed_before = False
         
         logger.info("=" * 60)
-        logger.info("🍍 PINYASURI TEST FLIGHT READY! 🚁")
-        logger.info("Waiting for drone to take off...")
+        logger.info("TEST FLIGHT SYSTEM READY")
+        logger.info("Waiting for drone to arm...")
         logger.info("=" * 60)
-
+        
         try:
             while not self.shutdown_event.is_set():
-
-                # Process In-Air Status (Wait for takeoff)
+                # Process Armed Status
                 try:
                     while True:
-                        in_air = in_air_queue.get_nowait()
-                        if in_air and not mission_started:
+                        armed_data = armed_queue.get_nowait()
+                        is_armed = armed_data["armed"]
+                        
+                        # Start monitoring when armed
+                        if is_armed and not mission_started:
                             mission_started = True
+                            was_armed_before = True
                             logger.info("=" * 60)
-                            logger.info("🛫 DRONE IN AIR - Mission monitoring started.")
+                            logger.info("🚁 DRONE ARMED - Mission monitoring started")
                             logger.info("=" * 60)
                         
-                        # Check for landing after mission completion
-                        if mission_completed and not in_air and not has_landed:
-                            has_landed = True
+                        # Detect disarm after mission (landing)
+                        if was_armed_before and not is_armed:
                             logger.info("=" * 60)
-                            logger.info("🛬 DRONE LANDED - Shutting down in 5 seconds...")
+                            logger.info("🛬 DRONE DISARMED - Mission complete")
+                            logger.info("Shutting down in 5 seconds...")
                             logger.info("=" * 60)
-                            await asyncio.sleep(5)      # Grace period for final logs
+                            await asyncio.sleep(5)
                             self.shutdown_event.set()
                 except asyncio.QueueEmpty:
                     pass
-
-                # Only process mission if drone is airborne
+                
+                # Only process mission if armed
                 if not mission_started:
                     await asyncio.sleep(config.MAIN_LOOP_INTERVAL)
                     continue
@@ -170,16 +173,7 @@ class TestFlightSystem:
                         prog = prog_queue.get_nowait()
                         last_progress = prog["current"]
                         mission_total = prog["total"]
-                        logger.info(f"》 Mission Progress: Waypoint {last_progress}/{mission_total}")
-                        
-                        # Check if mission completed (reached last waypoint)
-                        if mission_total > 0 and last_progress == mission_total:
-                            if not mission_completed:
-                                mission_completed = True
-                                logger.info("=" * 60)
-                                logger.info("🎯 MISSION COMPLETED - All waypoints visited")
-                                logger.info("Waiting for drone to return and land...")
-                                logger.info("=" * 60)
+                        logger.info(f"📍 Mission Progress: Waypoint {last_progress}/{mission_total}")
                 except asyncio.QueueEmpty:
                     pass
                 
@@ -203,17 +197,17 @@ class TestFlightSystem:
         
         finally:
             # Cleanup Tasks
-            logger.info("》 Stopping mission tasks...")
-            for task in [pos_task, prog_task, imu_task, batt_task, armed_task, in_air_task, metrics_task]:
+            logger.info("Stopping mission tasks...")
+            for task in [pos_task, prog_task, imu_task, batt_task, armed_task, metrics_task]:
                 task.cancel()
             await asyncio.gather(
-                pos_task, prog_task, imu_task, batt_task, armed_task, in_air_task, metrics_task, 
+                pos_task, prog_task, imu_task, batt_task, armed_task, metrics_task, 
                 return_exceptions=True
             )
 
     async def _capture_at_waypoint(self, waypoint_idx: int, mission_total: int, position: Optional[dict]):
         """Capture image at waypoint and log metadata"""
-
+        
         logger.info("=" * 60)
         logger.info(f"📸 WAYPOINT {waypoint_idx} REACHED - Capturing Image")
         logger.info("=" * 60)
@@ -221,7 +215,7 @@ class TestFlightSystem:
         try:
             # Capture Image
             image_path = self.camera.capture(prefix=f"wp{waypoint_idx}")
-            logger.info(f"》 Image saved: {image_path}")
+            logger.info(f"✓ Image saved: {image_path}")
             
             # Log Capture Metadata
             timestamp = datetime.utcnow().isoformat()
@@ -250,9 +244,8 @@ class TestFlightSystem:
 
     async def shutdown(self):
         """Graceful shutdown of all components"""
-
         logger.info("=" * 60)
-        logger.info("⚠ INITIATING SHUTDOWN ⚠")
+        logger.info("INITIATING SHUTDOWN")
         logger.info("=" * 60)
         
         self.shutdown_event.set()
@@ -270,7 +263,7 @@ async def main():
     
     # Initialize System
     logger.info("=" * 60)
-    logger.info("🍍 PINYASURI TEST FLIGHT SYSTEM 🚁")
+    logger.info("PINYASURI TEST FLIGHT SYSTEM")
     logger.info("=" * 60)
     
     if not await system.initialize():
@@ -278,8 +271,8 @@ async def main():
         return 1
     
     logger.info("=" * 60)
-    logger.info("✓ ALL SYSTEMS READY FOR TEST FLIGHT")
-    logger.info("System will start monitoring once drone takes off")
+    logger.info("✓ ALL SYSTEMS READY")
+    logger.info("System will start monitoring once drone is armed")
     logger.info("Press Ctrl+C to stop manually at any time")
     logger.info("=" * 60)
     
@@ -288,7 +281,7 @@ async def main():
         await system.run_mission()
     except KeyboardInterrupt:
         logger.info("=" * 60)
-        logger.info("⚠ MANUAL STOP - Interrupted by user! ⚠")
+        logger.info("⚠ MANUAL STOP - Interrupted by user (Ctrl+C)")
         logger.info("=" * 60)
     except Exception as e:
         logger.error(f"✗ Unexpected error: {e}", exc_info=True)
@@ -297,7 +290,7 @@ async def main():
         await system.shutdown()
     
     logger.info("=" * 60)
-    logger.info("⚠ PINYASURI TEST FLIGHT STOPPED ⚠")
+    logger.info("TEST FLIGHT SYSTEM STOPPED")
     logger.info("=" * 60)
     return 0
 
