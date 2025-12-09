@@ -5,10 +5,9 @@ BASE_DIR = Path(__file__).resolve().parent
 LOG_DIR = BASE_DIR / "logs"
 IMAGE_DIR = BASE_DIR / "images"
 RAW_IMG_DIR = IMAGE_DIR / "raw"
-ANNOTATED_IMG_DIR = IMAGE_DIR / "annotated"
 
 # CSV Output Files
-CLASSIFICATION_CSV = LOG_DIR / "classifications.csv"
+CLASSIFICATION_CSV = LOG_DIR / "ai_classifications.csv"
 FLIGHT_METRICS_CSV = LOG_DIR / "drone_flight_metrics.csv"
 
 # Pixhawk Configuration
@@ -16,7 +15,7 @@ PIXHAWK_ADDRESS = "serial:///dev/ttyAMA0:57600"
 CONNECTION_TIMEOUT = 30
 
 # Model Configuration
-MODEL_PATH = BASE_DIR / "models" / "pineapple_classifier.tflite"
+MODEL_PATH = BASE_DIR / "models" / "pinyasuri_classifier.tflite"
 MODEL_INPUT_SIZE = (224, 224)
 
 # Class Labels
@@ -42,5 +41,4 @@ def ensure_directories():
     """Create all necessary directories"""
     LOG_DIR.mkdir(exist_ok=True)
     RAW_IMG_DIR.mkdir(parents=True, exist_ok=True)
-    ANNOTATED_IMG_DIR.mkdir(parents=True, exist_ok=True)
     (BASE_DIR / "models").mkdir(exist_ok=True)

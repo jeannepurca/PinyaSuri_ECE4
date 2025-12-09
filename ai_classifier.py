@@ -17,9 +17,9 @@ class TFLiteClassifier:
             self.interpreter.allocate_tensors()                                 # Allocate tensors  
             self.input_details = self.interpreter.get_input_details()           # Get input details
             self.output_details = self.interpreter.get_output_details()         # Get output details
-            logger.info(f"Loaded TFLite model: {model_path}")                   # Log the loaded model
+            logger.info(f"✓ Loaded TFLite model: {model_path}")                   # Log the loaded model
         except Exception as e:
-            logger.error(f"Failed to load TFLite model from {model_path}: {e}")
+            logger.error(f"✗ Failed to load TFLite model from {model_path}: {e}")
             raise
 
     def preprocess(self, img_path):         # Preprocess image for model input
@@ -40,8 +40,8 @@ class TFLiteClassifier:
             probs = out[0]                                                      # Extract probabilities
             pred_idx = int(np.argmax(probs))                                    # Predicted class index
             confidence = float(np.max(probs))                                   # Confidence of prediction
-            logger.info(f"Prediction for {img_path}: class={pred_idx}, confidence={confidence:.3f}")
+            logger.info(f"》 Prediction for {img_path}: class={pred_idx}, confidence={confidence:.3f}")
             return {"index": pred_idx, "confidence": confidence, "raw": probs.tolist()}     # Return prediction dict
         except Exception as e:
-            logger.error(f"Prediction failed for {img_path}: {e}")
+            logger.error(f"⚠ Prediction failed for {img_path}: {e}")
             raise

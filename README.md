@@ -1,10 +1,10 @@
-# PinyaSuri
+# PinyaSuri: An AI-Driven Autonomous Drone System with Grid Localization for Pineapple Afflictions Detection, Classification, and Monitoring
 
-An Electronics Engineering capstone project for automated pineapple health monitoring using a drone powered by Pixhawk 2.4.8, Raspberry Pi 5, and AI-based image classification.
+This is a capstone project made by a group of Electronics Engineering students for the purpose of automating pineapple health monitoring using a drone powered by Pixhawk 2.4.8, Raspberry Pi 5 Microcontroller, and an AI-based image classification model.
 
 ## 🚁 System Overview
-The PinyaSuri system autonomously:
-1. Flies in a grid pattern using waypoints defined in Mission Planner
+The PinyaSuri drone system autonomously:
+1. Flies in a grid pattern, guided by different waypoints defined using Mission Planner software.
 2. Stops at each waypoint and captures high-resolution images of pineapples
 3. Analyzes images using an AI classifier to detect pineapple health status
 4. Logs GPS coordinates, classifications, and flight metrics to CSV files

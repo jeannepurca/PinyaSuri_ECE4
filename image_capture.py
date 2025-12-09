@@ -31,12 +31,12 @@ class ImageCapture:
         filename = f"{prefix}_{ts}.jpg"
         fullpath = self.output_dir / filename
         self.picam2.capture_file(str(fullpath))
-        logger.info(f"Captured {fullpath}")
+        logger.info(f"》 Captured {fullpath}")
         return str(fullpath)                                       
 
     def close(self):
         try:
             self.picam2.stop()
-            logger.info("Camera stopped successfully.")
+            logger.info("✓ Camera stopped successfully.")
         except Exception as e:
-            logger.warning(f"Error stopping camera: {e}")
+            logger.warning(f"✗ Error stopping camera: {e}")
