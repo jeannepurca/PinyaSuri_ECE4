@@ -33,25 +33,50 @@ class PixhawkInterface:
         except asyncio.TimeoutError:
             raise RuntimeError("⚠ Timeout waiting for Pixhawk connection.")
 
-    async def _setup_mavlink_connection(self):
-        """Setup direct MAVLink connection for raw message access"""
-        try:
-            # Extract connection string (convert serial path if needed)
-            conn_str = self.system_address.replace("serial://", "")
-            logger.info(f"》》》 Setting up MAVLink connection: {conn_str}")
+async def _setup_mavlink_connection(self):
+    """Setup direct MAVLink connection for raw message access"""
+    try:
+        # Extract serial port and baud rate
+        # MAVSDK format: "serial:///dev/ttyAMA0:57600"
+        # pymavlink needs: device='/dev/ttyAMA0', baud=57600
+        
+        conn_str = self.system_address.replace("serial://", "")
+        
+        # Split device and baud rate
+        if ':' in conn_str:
+            device, baud = conn_str.rsplit(':', 1)
+            baud = int(baud)
+        else:
+            device = conn_str
+            baud = 57600  # default
+        
+        logger.info(f"》》》 Setting up MAVLink connection: {device} at {baud} baud")
+        
+        # Create MAVLink connection in a thread to avoid blocking
+        loop = asyncio.get_event_loop()
+        self.mavlink_connection = await loop.run_in_executor(
+            None, 
+            lambda: mavutil.mavlink_connection(device, baud=baud)
+        )
+        
+        # Wait for heartbeat to confirm connection
+        logger.info("》》》 Waiting for MAVLink heartbeat...")
+        msg = await loop.run_in_executor(
+            None,
+            lambda: self.mavlink_connection.wait_heartbeat(timeout=5)
+        )
+        
+        if msg:
+            logger.info(f"✓ Direct MAVLink connection established. System ID: {self.mavlink_connection.target_system}")
+        else:
+            logger.error("✗ No heartbeat received from Pixhawk")
+            self.mavlink_connection = None
             
-            # Create MAVLink connection in a thread to avoid blocking
-            loop = asyncio.get_event_loop()
-            self.mavlink_connection = await loop.run_in_executor(
-                None, 
-                mavutil.mavlink_connection, 
-                conn_str
-            )
-            logger.info("✓ Direct MAVLink connection established.")
-        except Exception as e:
-            logger.warning(f"⚠ Could not establish direct MAVLink connection: {e}")
-            logger.warning("Will rely on MAVSDK telemetry only.")
-
+    except Exception as e:
+        logger.error(f"⚠ Could not establish direct MAVLink connection: {e}", exc_info=True)
+        logger.warning("Will rely on MAVSDK telemetry only.")
+        self.mavlink_connection = None
+        
     # Subscribe to Position Updates
     async def subscribe_positions(self, pos_queue: asyncio.Queue):
         async for pos in self.drone.telemetry.position():
