@@ -40,5 +40,6 @@ def get_class_name(index: int) -> str:
 def ensure_directories():
     """Create all necessary directories"""
     LOG_DIR.mkdir(exist_ok=True)
-    RAW_IMG_DIR.mkdir(parents=True, exist_ok=True)
+    IMAGE_DIR.mkdir(exist_ok=True)
+    TEST_IMAGE_DIR.mkdir(parents=True, exist_ok=True)
     (BASE_DIR / "models").mkdir(exist_ok=True)

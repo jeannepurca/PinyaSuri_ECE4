@@ -311,7 +311,7 @@ class TestFlight:
 async def main():
     """Main entry point"""
     
-    system = TestFlightSystem()
+    system = TestFlight()
     
     # Initialize system
     logger.info("=" * 60)

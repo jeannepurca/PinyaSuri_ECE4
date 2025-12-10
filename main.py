@@ -329,7 +329,7 @@ class PinyaSuri:
 async def main():
     """Main entry point"""
     
-    system = PinyaSuriSystem()
+    system = PinyaSuri()
     
     # Initialize system
     logger.info("=" * 60)
