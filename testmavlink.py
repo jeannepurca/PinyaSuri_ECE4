@@ -1,13 +1,19 @@
-from pymavlink import mavutil
+import asyncio
+from mavsdk import System
 
-# Connect to Pixhawk
-conn = mavutil.mavlink_connection(device='/dev/ttyAMA0', baud=57600)
+async def main():
+    drone = System()
+    await drone.connect("serial:///dev/ttyAMA0:57600")
+    print("Waiting for heartbeat...")
+    async for state in drone.core.connection_state():
+        if state.is_connected:
+            print("Pixhawk connected!")
+            break
 
-# Wait for heartbeat
-print("Waiting for heartbeat...")
-conn.wait_heartbeat()
-print("Heartbeat received from system %u component %u" % (conn.target_system, conn.target_component))
+    # Set mission progress stream rate
+    await drone.telemetry.set_rate_mission_progress(2)
 
-# Try reading one message
-msg = conn.recv_match(blocking=True)
-print(msg)
+    async for progress in drone.mission.mission_progress():
+        print(f"Waypoint {progress.current}/{progress.total}")
+
+asyncio.run(main())
