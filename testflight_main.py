@@ -128,6 +128,7 @@ class TestFlight:
         battery_queue = asyncio.Queue()
         armed_queue = asyncio.Queue()
         mode_queue = asyncio.Queue()
+        in_air_queue = asyncio.Queue()  # NEW: Track if drone is flying
         
         # Start Telemetry Subscriptions
         pos_task = asyncio.create_task(self.pixhawk.subscribe_positions(pos_queue))
@@ -135,6 +136,7 @@ class TestFlight:
         batt_task = asyncio.create_task(self.pixhawk.subscribe_battery(battery_queue))
         armed_task = asyncio.create_task(self.pixhawk.subscribe_armed(armed_queue))
         mode_task = asyncio.create_task(self.pixhawk.subscribe_flight_mode(mode_queue))
+        in_air_task = asyncio.create_task(self.pixhawk.subscribe_in_air(in_air_queue))  # NEW
 
         # Pass queues to metrics logger
         self.metrics_logger.pos_queue = pos_queue
@@ -147,6 +149,7 @@ class TestFlight:
         # Mission State Variables
         latest_pos = None
         is_armed = False
+        is_in_air = False  # NEW: Track if drone is flying
         mission_started = False
         was_armed_before = False
         current_flight_mode = "UNKNOWN"
@@ -211,9 +214,20 @@ class TestFlight:
                             logger.info(f"》 Flight Mode: {mode}")
                 except asyncio.QueueEmpty:
                     pass
+                
+                # Process In-Air Status (NEW)
+                try:
+                    while True:
+                        is_in_air = in_air_queue.get_nowait()
+                        if is_in_air:
+                            logger.info("》 Drone is now IN AIR - waypoint detection active")
+                        else:
+                            logger.info("》 Drone is on GROUND - waypoint detection paused")
+                except asyncio.QueueEmpty:
+                    pass
 
-                # Only check waypoints if armed and we have position data
-                if mission_started and latest_pos and self.waypoint_detector:
+                # Only check waypoints if armed, in air, and we have position data
+                if mission_started and is_in_air and latest_pos and self.waypoint_detector:
                     current_time = asyncio.get_event_loop().time()
                     
                     if current_time - last_check >= check_interval:
@@ -245,10 +259,10 @@ class TestFlight:
         finally:
             # Cleanup Tasks
             logger.info("》》》 Stopping mission tasks...")
-            for task in [pos_task, imu_task, batt_task, armed_task, mode_task, metrics_task]:
+            for task in [pos_task, imu_task, batt_task, armed_task, mode_task, in_air_task, metrics_task]:
                 task.cancel()
             await asyncio.gather(
-                pos_task, imu_task, batt_task, armed_task, mode_task, metrics_task, 
+                pos_task, imu_task, batt_task, armed_task, mode_task, in_air_task, metrics_task, 
                 return_exceptions=True
             )
 
