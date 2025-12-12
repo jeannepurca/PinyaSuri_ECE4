@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 from mavsdk import System
 
 # Configure Logging
@@ -41,7 +42,7 @@ class PixhawkInterface:
                     "lon": pos.longitude_deg,
                     "abs_alt": pos.absolute_altitude_m,
                     "rel_alt": pos.relative_altitude_m,
-                    "ts": pos.timestamp_us
+                    "ts": time.time()  # Generate timestamp ourselves
                 })
         except asyncio.CancelledError:
             logger.info("⚠ Position subscription stopped.")
@@ -66,10 +67,10 @@ class PixhawkInterface:
         try:
             async for imu in self.drone.telemetry.imu():
                 await imu_queue.put({
-                    "x": imu.accelerometer_m_s2.x,
-                    "y": imu.accelerometer_m_s2.y,
-                    "z": imu.accelerometer_m_s2.z,
-                    "ts": imu.timestamp_us
+                    "x": imu.acceleration_frd.forward_m_s2,
+                    "y": imu.acceleration_frd.right_m_s2,
+                    "z": imu.acceleration_frd.down_m_s2,
+                    "ts": time.time()  # Generate timestamp ourselves
                 })
         except asyncio.CancelledError:
             logger.info("⚠ IMU subscription stopped.")
@@ -84,7 +85,7 @@ class PixhawkInterface:
                 await battery_queue.put({
                     "percentage": b.remaining_percent,
                     "voltage": b.voltage_v,
-                    "ts": b.timestamp_us
+                    "ts": time.time()  # Generate timestamp ourselves
                 })
         except asyncio.CancelledError:
             logger.info("⚠ Battery subscription stopped.")
