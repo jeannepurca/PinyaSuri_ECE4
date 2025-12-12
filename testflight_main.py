@@ -13,7 +13,7 @@ from pixhawk_interface import PixhawkInterface
 from flight_metrics import FlightMetrics
 from image_capture import ImageCapture
 from waypoint_detector import WaypointDetector
-from mission_reader import read_mission_waypoints  # NEW IMPORT
+from mission_reader_mavsdk import read_mission_waypoints_mavsdk  # NEW IMPORT
 
 # Ensure directories exist before logging
 config.ensure_directories()
@@ -61,18 +61,12 @@ class TestFlight:
                     return False
                 await asyncio.sleep(2)
 
-        # Download mission waypoints using pymavlink (bypasses MAVSDK frame issue)
+        # Download mission waypoints using MAVSDK MAVLink passthrough (no port conflict)
         try:
-            logger.info("》》》 Downloading mission waypoints via pymavlink...")
+            logger.info("》》》 Downloading mission waypoints via MAVSDK...")
             
-            # Run synchronous pymavlink code in executor to avoid blocking
-            loop = asyncio.get_event_loop()
-            waypoints = await loop.run_in_executor(
-                None, 
-                read_mission_waypoints,
-                "/dev/ttyAMA0",
-                57600
-            )
+            # Use async MAVSDK call (no executor needed)
+            waypoints = await read_mission_waypoints_mavsdk(self.pixhawk)
             
             if len(waypoints) == 0:
                 logger.warning("⚠ No waypoints found in mission!")
