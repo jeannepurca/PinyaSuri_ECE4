@@ -46,54 +46,43 @@ class PixhawkInterface:
         except Exception as e:
             logger.error(f"Position subscription error: {e}", exc_info=True)
 
-    # Subscribe to Mission Progress - POLLING VERSION
+    # Subscribe to Mission Progress - STREAMING VERSION
     async def subscribe_mission_progress(self, prog_queue: asyncio.Queue):  
         """
-        Poll mission progress periodically.
-        This is more reliable than subscriptions for Mission Planner missions.
+        Subscribe to mission progress using MAVSDK streaming.
+        This continuously monitors mission changes.
         """
-        logger.info("》》》 Starting mission progress polling (5Hz)...")
+        logger.info("》》》 Starting mission progress subscription...")
         
         last_current = -1
         last_total = 0
-        poll_interval = 0.2  # Poll every 200ms (5Hz)
         
         try:
-            while True:
-                try:
-                    # Poll mission progress
-                    async for progress in self.drone.mission.mission_progress():
-                        current = progress.current
-                        total = progress.total
-                        
-                        # Update total if changed
-                        if total != last_total and total > 0:
-                            last_total = total
-                            logger.info(f"》 Mission has {total} waypoints")
-                        
-                        # Report waypoint changes
-                        if current != last_current:
-                            logger.info(f"》 Mission Progress: Waypoint {current}/{total}")
-                            await prog_queue.put({
-                                "current": current,
-                                "total": total,
-                                "source": "mavsdk_poll"
-                            })
-                            last_current = current
-                        
-                        # Only get one reading per poll
-                        break
-                        
-                except Exception as poll_error:
-                    logger.debug(f"Poll error (normal during init): {poll_error}")
+            # This is a STREAMING subscription - don't break!
+            async for progress in self.drone.mission.mission_progress():
+                current = progress.current
+                total = progress.total
                 
-                await asyncio.sleep(poll_interval)
+                # Update total if changed
+                if total != last_total and total > 0:
+                    last_total = total
+                    logger.info(f"》 Mission has {total} waypoints")
+                
+                # Report waypoint changes
+                if current != last_current:
+                    logger.info(f"》 Mission Progress: Waypoint {current}/{total}")
+                    await prog_queue.put({
+                        "current": current,
+                        "total": total,
+                        "source": "mavsdk"
+                    })
+                    last_current = current
                     
         except asyncio.CancelledError:
-            logger.info("⚠ Mission progress polling stopped.")
+            logger.info("⚠ Mission progress subscription stopped.")
             raise
         except Exception as e:
-            logger.error(f"✗ Error in mission progress polling: {e}", exc_info=True)
+            logger.error(f"✗ Error in mission progress subscription: {e}", exc_info=True)
 
     # Subscribe to Flight Mode Updates
     async def subscribe_flight_mode(self, mode_queue: asyncio.Queue):
