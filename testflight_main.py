@@ -13,7 +13,6 @@ from pixhawk_interface import PixhawkInterface
 from flight_metrics import FlightMetrics
 from image_capture import ImageCapture
 from waypoint_detector import WaypointDetector
-from mission_reader import read_mission_waypoints  # NEW IMPORT
 
 # Ensure directories exist before logging
 config.ensure_directories()
