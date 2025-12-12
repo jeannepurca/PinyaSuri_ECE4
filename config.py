@@ -15,7 +15,8 @@ PIXHAWK_ADDRESS = "serial:///dev/ttyAMA0:57600"
 CONNECTION_TIMEOUT = 30
 
 # Waypoint Detection Configuration
-WAYPOINT_DETECTION_RADIUS = 2.0  # meters
+# INCREASED from 2.0 to 5.0 meters to account for GPS drift
+WAYPOINT_DETECTION_RADIUS = 5.0  # meters
 
 # Model Configuration
 MODEL_PATH = BASE_DIR / "models" / "pinyasuri_classifier.tflite"

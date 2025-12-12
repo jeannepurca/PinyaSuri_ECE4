@@ -61,7 +61,7 @@ class TestFlight:
                     return False
                 await asyncio.sleep(2)
 
-        # Download mission waypoints using MAVSDK MAVLink passthrough (no port conflict)
+        # Download mission waypoints using MAVSDK
         try:
             logger.info("》》》 Downloading mission waypoints via MAVSDK...")
             
@@ -73,7 +73,15 @@ class TestFlight:
                 self.waypoint_detector = None
             else:
                 logger.info(f"✓ Loaded {len(waypoints)} waypoints for detection")
-                self.waypoint_detector = WaypointDetector(waypoints, radius_meters=config.WAYPOINT_DETECTION_RADIUS)
+                # INCREASED detection radius to 5 meters for better GPS tolerance
+                self.waypoint_detector = WaypointDetector(waypoints, radius_meters=5.0)
+                
+                # Log all waypoints for debugging
+                logger.info("=" * 60)
+                logger.info("LOADED WAYPOINTS:")
+                for idx, (lat, lon, alt) in enumerate(waypoints):
+                    logger.info(f"  WP{idx+1}: ({lat:.7f}, {lon:.7f}, {alt:.1f}m)")
+                logger.info("=" * 60)
                 
         except Exception as e:
             logger.warning(f"⚠ Could not download mission: {e}")
@@ -110,7 +118,7 @@ class TestFlight:
             header = [
                 "timestamp_utc", "image_path", "lat", "lon", 
                 "abs_alt_m", "rel_alt_m", "waypoint_number", "total_waypoints",
-                "flight_number"  # NEW: Track which flight captured this
+                "flight_number"
             ]
             
             with open(capture_log, "w", newline="") as f:
@@ -137,7 +145,7 @@ class TestFlight:
         mode_task = asyncio.create_task(self.pixhawk.subscribe_flight_mode(mode_queue))
         in_air_task = asyncio.create_task(self.pixhawk.subscribe_in_air(in_air_queue))
 
-        # Pass queues to metrics logger (FIXED)
+        # Pass queues to metrics logger
         self.metrics_logger.pos_queue = pos_queue
         self.metrics_logger.imu_queue = imu_queue
         self.metrics_logger.battery_queue = battery_queue
@@ -154,11 +162,13 @@ class TestFlight:
         current_flight_mode = "UNKNOWN"
         check_interval = 0.5
         last_check = 0
-        flight_number = 0  # NEW: Track flight cycles
+        flight_number = 0
+        last_distance_log = 0  # NEW: For periodic distance logging
 
         # DEBUG: Counters
         position_update_count = 0
         mode_update_count = 0
+        waypoint_check_count = 0  # NEW: Count waypoint checks
         
         logger.info("=" * 60)
         logger.info("🍍 PINYASURI TEST FLIGHT READY! 🚁")
@@ -194,6 +204,7 @@ class TestFlight:
                             logger.info("=" * 60)
                             logger.info(f"🛬 FLIGHT #{flight_number} - DRONE DISARMED")
                             logger.info(f"   Total position updates: {position_update_count}")
+                            logger.info(f"   Total waypoint checks: {waypoint_check_count}")
                             if self.waypoint_detector:
                                 captured = sorted([x+1 for x in self.waypoint_detector.captured])
                                 logger.info(f"   Captured waypoints: {captured}")
@@ -203,6 +214,7 @@ class TestFlight:
                             # Reset for next flight
                             mission_started = False
                             position_update_count = 0
+                            waypoint_check_count = 0
                         
                         is_armed = new_armed
                         
@@ -243,12 +255,45 @@ class TestFlight:
                 except asyncio.QueueEmpty:
                     pass
 
-                # Only check waypoints if armed, in air, and we have position data
-                if mission_started and is_in_air and latest_pos and self.waypoint_detector:
-                    current_time = asyncio.get_event_loop().time()
+                # MODIFIED: Check waypoints with better debugging
+                current_time = asyncio.get_event_loop().time()
+                
+                # Log current status every 5 seconds when armed
+                if mission_started and (current_time - last_distance_log >= 5.0):
+                    last_distance_log = current_time
+                    status = []
+                    status.append(f"Armed={is_armed}")
+                    status.append(f"InAir={is_in_air}")
+                    status.append(f"HasPos={latest_pos is not None}")
+                    status.append(f"HasWP={self.waypoint_detector is not None}")
                     
+                    if latest_pos:
+                        status.append(f"Pos=({latest_pos['lat']:.7f}, {latest_pos['lon']:.7f})")
+                        status.append(f"Alt={latest_pos['rel_alt']:.1f}m")
+                        
+                        # Log distance to nearest waypoint
+                        if self.waypoint_detector:
+                            nearest_wp, nearest_dist = None, float('inf')
+                            for idx, (wp_lat, wp_lon, wp_alt) in enumerate(self.waypoint_detector.waypoints):
+                                if idx not in self.waypoint_detector.captured:
+                                    dist = self.waypoint_detector.haversine_distance(
+                                        latest_pos['lat'], latest_pos['lon'], wp_lat, wp_lon
+                                    )
+                                    if dist < nearest_dist:
+                                        nearest_dist = dist
+                                        nearest_wp = idx + 1
+                            
+                            if nearest_wp:
+                                status.append(f"NearestWP={nearest_wp} ({nearest_dist:.1f}m)")
+                    
+                    logger.info(f"[STATUS] {' | '.join(status)}")
+
+                # SIMPLIFIED: Check waypoints if we have basic requirements
+                # Remove is_in_air requirement temporarily for debugging
+                if mission_started and latest_pos and self.waypoint_detector:
                     if current_time - last_check >= check_interval:
                         last_check = current_time
+                        waypoint_check_count += 1
                         
                         # Check if near any waypoint
                         wp_idx, distance = self.waypoint_detector.check_position(
@@ -260,6 +305,7 @@ class TestFlight:
                             logger.info("=" * 60)
                             logger.info(f"📍 WAYPOINT {wp_idx + 1} DETECTED!")
                             logger.info(f"   Distance: {distance:.2f}m from waypoint")
+                            logger.info(f"   In Air Status: {is_in_air}")
                             logger.info("=" * 60)
                             
                             await self._capture_at_waypoint(
