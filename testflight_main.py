@@ -13,7 +13,7 @@ from pixhawk_interface import PixhawkInterface
 from flight_metrics import FlightMetrics
 from image_capture import ImageCapture
 from waypoint_detector import WaypointDetector
-from mission_reader_mavsdk import read_mission_waypoints_mavsdk  # NEW IMPORT
+from mission_reader_mavsdk import read_mission_waypoints_mavsdk
 
 # Ensure directories exist before logging
 config.ensure_directories()
@@ -65,7 +65,6 @@ class TestFlight:
         try:
             logger.info("》》》 Downloading mission waypoints via MAVSDK...")
             
-            # Use async MAVSDK call (no executor needed)
             waypoints = await read_mission_waypoints_mavsdk(self.pixhawk)
             
             if len(waypoints) == 0:
@@ -74,8 +73,7 @@ class TestFlight:
                 self.waypoint_detector = None
             else:
                 logger.info(f"✓ Loaded {len(waypoints)} waypoints for detection")
-                # Initialize waypoint detector with 5m radius
-                self.waypoint_detector = WaypointDetector(waypoints, radius_meters=5.0)
+                self.waypoint_detector = WaypointDetector(waypoints, radius_meters=config.WAYPOINT_DETECTION_RADIUS)
                 
         except Exception as e:
             logger.warning(f"⚠ Could not download mission: {e}")
@@ -111,7 +109,8 @@ class TestFlight:
         if not capture_log.exists():
             header = [
                 "timestamp_utc", "image_path", "lat", "lon", 
-                "abs_alt_m", "rel_alt_m", "waypoint_number", "total_waypoints"
+                "abs_alt_m", "rel_alt_m", "waypoint_number", "total_waypoints",
+                "flight_number"  # NEW: Track which flight captured this
             ]
             
             with open(capture_log, "w", newline="") as f:
@@ -120,7 +119,7 @@ class TestFlight:
             logger.info(f"》 Created image capture log: {capture_log}")
     
     async def run_mission(self):
-        """Main mission loop with distance-based waypoint detection"""
+        """Main mission loop with continuous cycle support"""
         
         # Create Queues for Telemetry
         pos_queue = asyncio.Queue()
@@ -128,7 +127,7 @@ class TestFlight:
         battery_queue = asyncio.Queue()
         armed_queue = asyncio.Queue()
         mode_queue = asyncio.Queue()
-        in_air_queue = asyncio.Queue()  # NEW: Track if drone is flying
+        in_air_queue = asyncio.Queue()
         
         # Start Telemetry Subscriptions
         pos_task = asyncio.create_task(self.pixhawk.subscribe_positions(pos_queue))
@@ -136,9 +135,9 @@ class TestFlight:
         batt_task = asyncio.create_task(self.pixhawk.subscribe_battery(battery_queue))
         armed_task = asyncio.create_task(self.pixhawk.subscribe_armed(armed_queue))
         mode_task = asyncio.create_task(self.pixhawk.subscribe_flight_mode(mode_queue))
-        in_air_task = asyncio.create_task(self.pixhawk.subscribe_in_air(in_air_queue))  # NEW
+        in_air_task = asyncio.create_task(self.pixhawk.subscribe_in_air(in_air_queue))
 
-        # Pass queues to metrics logger
+        # Pass queues to metrics logger (FIXED)
         self.metrics_logger.pos_queue = pos_queue
         self.metrics_logger.imu_queue = imu_queue
         self.metrics_logger.battery_queue = battery_queue
@@ -149,12 +148,13 @@ class TestFlight:
         # Mission State Variables
         latest_pos = None
         is_armed = False
-        is_in_air = False  # NEW: Track if drone is flying
+        is_in_air = False
         mission_started = False
         was_armed_before = False
         current_flight_mode = "UNKNOWN"
-        check_interval = 0.5  # Check position every 500ms
+        check_interval = 0.5
         last_check = 0
+        flight_number = 0  # NEW: Track flight cycles
 
         # DEBUG: Counters
         position_update_count = 0
@@ -162,7 +162,7 @@ class TestFlight:
         
         logger.info("=" * 60)
         logger.info("🍍 PINYASURI TEST FLIGHT READY! 🚁")
-        logger.info("Waiting for drone to arm...")
+        logger.info("System will run continuously. Press Ctrl+C to stop.")
         logger.info("=" * 60)
 
         try:
@@ -172,27 +172,40 @@ class TestFlight:
                 try:
                     while True:
                         armed_data = armed_queue.get_nowait()
-                        is_armed = armed_data["armed"]
+                        new_armed = armed_data["armed"]
                         
-                        # Start monitoring when armed
-                        if is_armed and not mission_started:
+                        # Detect ARM transition (start new flight)
+                        if new_armed and not is_armed:
+                            flight_number += 1
                             mission_started = True
                             was_armed_before = True
+                            
+                            # Reset waypoint detector for new flight
+                            if self.waypoint_detector:
+                                self.waypoint_detector.reset()
+                            
                             logger.info("=" * 60)
-                            logger.info("🛫 DRONE ARMED - Mission monitoring started.")
+                            logger.info(f"🛫 FLIGHT #{flight_number} - DRONE ARMED")
+                            logger.info("   Mission monitoring started")
                             logger.info("=" * 60)
 
-                        # Detect disarm after mission (landing)
-                        if was_armed_before and not is_armed:
+                        # Detect DISARM transition (end current flight)
+                        if not new_armed and is_armed and was_armed_before:
                             logger.info("=" * 60)
-                            logger.info("🛬 DRONE DISARMED - Mission complete.")
-                            logger.info(f"》 DEBUG: Total position updates: {position_update_count}")
+                            logger.info(f"🛬 FLIGHT #{flight_number} - DRONE DISARMED")
+                            logger.info(f"   Total position updates: {position_update_count}")
                             if self.waypoint_detector:
-                                logger.info(f"》 DEBUG: Captured waypoints: {sorted([x+1 for x in self.waypoint_detector.captured])}")
-                            logger.info("》》》 Shutting down in 5 seconds...")
+                                captured = sorted([x+1 for x in self.waypoint_detector.captured])
+                                logger.info(f"   Captured waypoints: {captured}")
+                            logger.info("   Ready for next flight...")
                             logger.info("=" * 60)
-                            await asyncio.sleep(5)
-                            self.shutdown_event.set()
+                            
+                            # Reset for next flight
+                            mission_started = False
+                            position_update_count = 0
+                        
+                        is_armed = new_armed
+                        
                 except asyncio.QueueEmpty:
                     pass
             
@@ -215,14 +228,18 @@ class TestFlight:
                 except asyncio.QueueEmpty:
                     pass
                 
-                # Process In-Air Status (NEW)
+                # Process In-Air Status
                 try:
                     while True:
-                        is_in_air = in_air_queue.get_nowait()
-                        if is_in_air:
+                        new_in_air = in_air_queue.get_nowait()
+                        
+                        # Log transitions
+                        if new_in_air and not is_in_air:
                             logger.info("》 Drone is now IN AIR - waypoint detection active")
-                        else:
+                        elif not new_in_air and is_in_air:
                             logger.info("》 Drone is on GROUND - waypoint detection paused")
+                        
+                        is_in_air = new_in_air
                 except asyncio.QueueEmpty:
                     pass
 
@@ -246,9 +263,10 @@ class TestFlight:
                             logger.info("=" * 60)
                             
                             await self._capture_at_waypoint(
-                                wp_idx + 1,  # Human-readable numbering (1-indexed)
+                                wp_idx + 1,
                                 len(self.waypoint_detector.waypoints),
-                                latest_pos
+                                latest_pos,
+                                flight_number
                             )
                 
                 await asyncio.sleep(config.MAIN_LOOP_INTERVAL)
@@ -266,7 +284,8 @@ class TestFlight:
                 return_exceptions=True
             )
 
-    async def _capture_at_waypoint(self, waypoint_idx: int, mission_total: int, position: Optional[dict]):
+    async def _capture_at_waypoint(self, waypoint_idx: int, mission_total: int, 
+                                   position: Optional[dict], flight_number: int):
         """Capture image at waypoint and log metadata"""
 
         logger.info("=" * 60)
@@ -275,7 +294,7 @@ class TestFlight:
 
         try:
             # Capture Image
-            image_path = self.camera.capture(prefix=f"wp{waypoint_idx}")
+            image_path = self.camera.capture(prefix=f"flight{flight_number}_wp{waypoint_idx}")
             logger.info(f"✓ Image captured: {image_path}")
             
             # Log to CSV
@@ -291,7 +310,7 @@ class TestFlight:
                 writer = csv.writer(f)
                 writer.writerow([
                     timestamp, image_path, lat, lon, abs_alt, rel_alt,
-                    waypoint_idx, mission_total
+                    waypoint_idx, mission_total, flight_number
                 ])
             
             # Display Position Info
@@ -335,8 +354,8 @@ async def main():
     
     logger.info("=" * 60)
     logger.info("✓ ALL SYSTEMS INITIALIZED SUCCESSFULLY!")
-    logger.info("System will start monitoring once drone is armed.")
-    logger.info("Press Ctrl+C to stop manually at any time.")
+    logger.info("System ready for continuous flight cycles.")
+    logger.info("Press Ctrl+C to stop.")
     logger.info("=" * 60)
     
     # Run Mission

@@ -14,6 +14,7 @@ from flight_metrics import FlightMetrics
 from image_capture import ImageCapture
 from ai_classifier import Classifier
 from waypoint_detector import WaypointDetector
+from mission_reader_mavsdk import read_mission_waypoints_mavsdk
 
 # Ensure directories exist before logging
 config.ensure_directories()
@@ -21,7 +22,7 @@ config.ensure_directories()
 # Configure Logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    format='%(levelname)s:%(name)s:%(message)s',
     handlers=[
         logging.FileHandler(config.LOG_DIR / "flight.log"),
         logging.StreamHandler()
@@ -31,7 +32,7 @@ logger = logging.getLogger("PinyaSuri")
 
 
 class PinyaSuri:
-    """Main system coordinator for PinyaSuri"""
+    """Main system coordinator for PinyaSuri with continuous cycle support"""
 
     def __init__(self):
         self.pixhawk: Optional[PixhawkInterface] = None
@@ -62,18 +63,11 @@ class PinyaSuri:
                     return False
                 await asyncio.sleep(2)
 
-        # Download mission waypoints for distance-based detection
+        # Download mission waypoints using MAVSDK
         try:
-            logger.info("》》》 Downloading mission waypoints...")
-            mission_plan = await self.pixhawk.drone.mission.download_mission()
+            logger.info("》》》 Downloading mission waypoints via MAVSDK...")
             
-            # Extract waypoint coordinates (skip home/takeoff/land commands)
-            waypoints = []
-            for idx, item in enumerate(mission_plan.mission_items):
-                # Command 16 = WAYPOINT, skip others (22=TAKEOFF, 20=LAND, etc.)
-                if item.command == 16 and idx > 0:  # Skip home (idx 0)
-                    waypoints.append((item.latitude_deg, item.longitude_deg, item.altitude_m))
-                    logger.info(f"  WP{len(waypoints)}: ({item.latitude_deg:.7f}, {item.longitude_deg:.7f})")
+            waypoints = await read_mission_waypoints_mavsdk(self.pixhawk)
             
             if len(waypoints) == 0:
                 logger.warning("⚠ No waypoints found in mission!")
@@ -81,8 +75,7 @@ class PinyaSuri:
                 self.waypoint_detector = None
             else:
                 logger.info(f"✓ Loaded {len(waypoints)} waypoints for detection")
-                # Initialize waypoint detector with 5m radius
-                self.waypoint_detector = WaypointDetector(waypoints, radius_meters=5.0)
+                self.waypoint_detector = WaypointDetector(waypoints, radius_meters=config.WAYPOINT_DETECTION_RADIUS)
                 
         except Exception as e:
             logger.warning(f"⚠ Could not download mission: {e}")
@@ -130,7 +123,7 @@ class PinyaSuri:
             header = [
                 "timestamp_utc", "image_path", "lat", "lon", "abs_alt_m", "rel_alt_m",
                 "waypoint_number", "total_waypoints", "pred_idx", "pred_label",
-                "confidence"
+                "confidence", "flight_number"  # ADDED: Track which flight
             ]
             
             with open(config.CLASSIFICATION_CSV, "w", newline="") as f:
@@ -139,7 +132,7 @@ class PinyaSuri:
             logger.info(f"》 Created classification log: {config.CLASSIFICATION_CSV}")
     
     async def run_mission(self):
-        """Main mission loop with distance-based waypoint detection"""
+        """Main mission loop with continuous cycle support"""
         
         # Create Queues for Telemetry
         pos_queue = asyncio.Queue()
@@ -147,6 +140,7 @@ class PinyaSuri:
         battery_queue = asyncio.Queue()
         armed_queue = asyncio.Queue()
         mode_queue = asyncio.Queue()
+        in_air_queue = asyncio.Queue()
         
         # Start Telemetry Subscriptions
         pos_task = asyncio.create_task(self.pixhawk.subscribe_positions(pos_queue))
@@ -154,8 +148,9 @@ class PinyaSuri:
         batt_task = asyncio.create_task(self.pixhawk.subscribe_battery(battery_queue))
         armed_task = asyncio.create_task(self.pixhawk.subscribe_armed(armed_queue))
         mode_task = asyncio.create_task(self.pixhawk.subscribe_flight_mode(mode_queue))
+        in_air_task = asyncio.create_task(self.pixhawk.subscribe_in_air(in_air_queue))
 
-        # Pass queues to metrics logger
+        # Pass queues to metrics logger (FIXED)
         self.metrics_logger.pos_queue = pos_queue
         self.metrics_logger.imu_queue = imu_queue
         self.metrics_logger.battery_queue = battery_queue
@@ -166,11 +161,13 @@ class PinyaSuri:
         # Mission State Variables
         latest_pos = None
         is_armed = False
+        is_in_air = False
         mission_started = False
         was_armed_before = False
         current_flight_mode = "UNKNOWN"
-        check_interval = 0.5  # Check position every 500ms
+        check_interval = 0.5
         last_check = 0
+        flight_number = 0  # Track flight cycles
 
         # DEBUG: Counters
         position_update_count = 0
@@ -178,7 +175,7 @@ class PinyaSuri:
         
         logger.info("=" * 60)
         logger.info("🍍 PINYASURI SYSTEM READY! 🚁")
-        logger.info("Waiting for drone to arm...")
+        logger.info("System will run continuously. Press Ctrl+C to stop.")
         logger.info("=" * 60)
 
         try:
@@ -188,27 +185,40 @@ class PinyaSuri:
                 try:
                     while True:
                         armed_data = armed_queue.get_nowait()
-                        is_armed = armed_data["armed"]
+                        new_armed = armed_data["armed"]
                         
-                        # Start monitoring when armed
-                        if is_armed and not mission_started:
+                        # Detect ARM transition (start new flight)
+                        if new_armed and not is_armed:
+                            flight_number += 1
                             mission_started = True
                             was_armed_before = True
+                            
+                            # Reset waypoint detector for new flight
+                            if self.waypoint_detector:
+                                self.waypoint_detector.reset()
+                            
                             logger.info("=" * 60)
-                            logger.info("🛫 DRONE ARMED - Mission monitoring started.")
+                            logger.info(f"🛫 FLIGHT #{flight_number} - DRONE ARMED")
+                            logger.info("   Mission monitoring started")
                             logger.info("=" * 60)
 
-                        # Detect disarm after mission (landing)
-                        if was_armed_before and not is_armed:
+                        # Detect DISARM transition (end current flight)
+                        if not new_armed and is_armed and was_armed_before:
                             logger.info("=" * 60)
-                            logger.info("🛬 DRONE DISARMED - Mission complete.")
-                            logger.info(f"》 DEBUG: Total position updates: {position_update_count}")
+                            logger.info(f"🛬 FLIGHT #{flight_number} - DRONE DISARMED")
+                            logger.info(f"   Total position updates: {position_update_count}")
                             if self.waypoint_detector:
-                                logger.info(f"》 DEBUG: Captured waypoints: {sorted([x+1 for x in self.waypoint_detector.captured])}")
-                            logger.info("》》》 Shutting down in 5 seconds...")
+                                captured = sorted([x+1 for x in self.waypoint_detector.captured])
+                                logger.info(f"   Captured waypoints: {captured}")
+                            logger.info("   Ready for next flight...")
                             logger.info("=" * 60)
-                            await asyncio.sleep(5)
-                            self.shutdown_event.set()
+                            
+                            # Reset for next flight
+                            mission_started = False
+                            position_update_count = 0
+                        
+                        is_armed = new_armed
+                        
                 except asyncio.QueueEmpty:
                     pass
             
@@ -230,9 +240,24 @@ class PinyaSuri:
                             logger.info(f"》 Flight Mode: {mode}")
                 except asyncio.QueueEmpty:
                     pass
+                
+                # Process In-Air Status
+                try:
+                    while True:
+                        new_in_air = in_air_queue.get_nowait()
+                        
+                        # Log transitions
+                        if new_in_air and not is_in_air:
+                            logger.info("》 Drone is now IN AIR - waypoint detection active")
+                        elif not new_in_air and is_in_air:
+                            logger.info("》 Drone is on GROUND - waypoint detection paused")
+                        
+                        is_in_air = new_in_air
+                except asyncio.QueueEmpty:
+                    pass
 
-                # Only check waypoints if armed and we have position data
-                if mission_started and latest_pos and self.waypoint_detector:
+                # Only check waypoints if armed, in air, and we have position data
+                if mission_started and is_in_air and latest_pos and self.waypoint_detector:
                     current_time = asyncio.get_event_loop().time()
                     
                     if current_time - last_check >= check_interval:
@@ -251,9 +276,10 @@ class PinyaSuri:
                             logger.info("=" * 60)
                             
                             await self._process_waypoint(
-                                wp_idx + 1,  # Human-readable numbering (1-indexed)
+                                wp_idx + 1,
                                 len(self.waypoint_detector.waypoints),
-                                latest_pos
+                                latest_pos,
+                                flight_number
                             )
                 
                 await asyncio.sleep(config.MAIN_LOOP_INTERVAL)
@@ -264,14 +290,15 @@ class PinyaSuri:
         finally:
             # Cleanup Tasks
             logger.info("》》》 Stopping mission tasks...")
-            for task in [pos_task, prog_task, imu_task, batt_task, armed_task, mode_task, metrics_task]:
+            for task in [pos_task, imu_task, batt_task, armed_task, mode_task, in_air_task, metrics_task]:
                 task.cancel()
             await asyncio.gather(
-                pos_task, prog_task, imu_task, batt_task, armed_task, mode_task, metrics_task, 
+                pos_task, imu_task, batt_task, armed_task, mode_task, in_air_task, metrics_task, 
                 return_exceptions=True
             )
 
-    async def _process_waypoint(self, waypoint_idx: int, mission_total: int, position: Optional[dict]):
+    async def _process_waypoint(self, waypoint_idx: int, mission_total: int, 
+                               position: Optional[dict], flight_number: int):
         """Capture image and run classification at a waypoint"""
 
         logger.info("=" * 60)
@@ -280,7 +307,7 @@ class PinyaSuri:
 
         try:
             # Capture Image
-            image_path = self.camera.capture(prefix=f"wp{waypoint_idx}")
+            image_path = self.camera.capture(prefix=f"flight{flight_number}_wp{waypoint_idx}")
             logger.info(f"✓ Image captured: {image_path}")
             
             # Run AI Classification
@@ -300,7 +327,7 @@ class PinyaSuri:
                 writer.writerow([
                     timestamp, image_path, lat, lon, abs_alt, rel_alt,
                     waypoint_idx, mission_total, result["index"], pred_label,
-                    result["confidence"]
+                    result["confidence"], flight_number
                 ])
             
             # Display Position Info
@@ -344,8 +371,8 @@ async def main():
     
     logger.info("=" * 60)
     logger.info("✓ ALL SYSTEMS INITIALIZED SUCCESSFULLY!")
-    logger.info("System will start monitoring once drone is armed.")
-    logger.info("Press Ctrl+C to stop manually at any time.")
+    logger.info("System ready for continuous flight cycles.")
+    logger.info("Press Ctrl+C to stop.")
     logger.info("=" * 60)
     
     # Run Mission

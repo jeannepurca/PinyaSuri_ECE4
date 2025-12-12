@@ -32,89 +32,164 @@ class FlightMetrics:
                     "vib_rms_m_s2","hover_jitter_m","altitude_stability_m",
                     "battery_pct","flight_time_s"
                 ])
+            logger.info(f"》 Created flight metrics CSV: {self.output_csv}")
 
-        # Queues
-        self.pos_queue = asyncio.Queue()        # Queue for position data
-        self.imu_queue = asyncio.Queue()        # Queue for IMU data
-        self.battery_queue = asyncio.Queue()    # Queue for battery data
-        self.armed_queue = asyncio.Queue()      # Queue for armed status
-        self.latest_pos = None                  # Latest position
-        self.latest_imu = None                  # Latest IMU data
-        self.latest_batt = None                 # Latest battery data
-        self.armed = False                      # Armed status
-        self.flight_start = None                # Flight start time
+        # Queues will be set by main code
+        self.pos_queue = None
+        self.imu_queue = None
+        self.battery_queue = None
+        self.armed_queue = None
+        
+        # State tracking
+        self.latest_pos = None
+        self.latest_imu = None
+        self.latest_batt = None
+        self.armed = False
+        self.flight_start = None
+        self.metrics_count = 0  # DEBUG: Track how many metrics logged
+        self.debug_check_count = 0  # DEBUG: Track how many times we checked for data
 
     async def run(self):
-        while True:
-            # Update latest data from queues
-            try:
-                while True:
-                    self.latest_pos = self.pos_queue.get_nowait()               # Get latest position
-            except asyncio.QueueEmpty:
-                pass
-            try:
-                while True:
-                    self.latest_imu = self.imu_queue.get_nowait()               # Get latest IMU data
-            except asyncio.QueueEmpty:
-                pass
-            try:
-                while True:
-                    self.latest_batt = self.battery_queue.get_nowait()          # Get latest battery data
-            except asyncio.QueueEmpty:
-                pass
-            try:
-                while True:
-                    armed_status = self.armed_queue.get_nowait()                # Get latest armed status
-                    self.armed = armed_status["armed"]
-                    if self.armed and self.flight_start is None:
-                        self.flight_start = datetime.utcnow()
-            except asyncio.QueueEmpty:  # No new armed status
-                pass
+        """Main metrics logging loop"""
+        logger.info("》 FlightMetrics logger started")
+        
+        try:
+            while True:
+                # Update latest data from queues
+                if self.pos_queue:
+                    try:
+                        while True:
+                            self.latest_pos = self.pos_queue.get_nowait()
+                    except asyncio.QueueEmpty:
+                        pass
+                
+                if self.imu_queue:
+                    try:
+                        while True:
+                            self.latest_imu = self.imu_queue.get_nowait()
+                    except asyncio.QueueEmpty:
+                        pass
+                
+                if self.battery_queue:
+                    try:
+                        while True:
+                            self.latest_batt = self.battery_queue.get_nowait()
+                    except asyncio.QueueEmpty:
+                        pass
+                
+                if self.armed_queue:
+                    try:
+                        while True:
+                            armed_status = self.armed_queue.get_nowait()
+                            new_armed = armed_status["armed"]
+                            
+                            # Detect arming (start new flight timer)
+                            if new_armed and not self.armed:
+                                self.flight_start = datetime.utcnow()
+                                logger.info("》 Flight timer started")
+                            
+                            # Detect disarming (reset timer for next flight)
+                            if not new_armed and self.armed:
+                                self.flight_start = None
+                                logger.info("》 Flight timer reset")
+                            
+                            self.armed = new_armed
+                    except asyncio.QueueEmpty:
+                        pass
 
-            if self.latest_pos and self.latest_imu:                     # Ensure we have data
-                # Metrics: Altitude Stability
-                self.alt_window.append(self.latest_pos["rel_alt"])      # Relative altitude
-                if len(self.alt_window) > self.window_size:             # If window is full
-                    self.alt_window.pop(0)                              # Remove oldest entry
+                # DEBUG: Check data availability every 20 cycles (10 seconds at 0.5s interval)
+                self.debug_check_count += 1
+                if self.metrics_count == 0 and self.debug_check_count % 20 == 0:
+                    logger.info(f"》 DEBUG: Waiting for data - Pos: {self.latest_pos is not None}, "
+                              f"IMU: {self.latest_imu is not None}, "
+                              f"Battery: {self.latest_batt is not None}, "
+                              f"Armed: {self.armed}")
+                    if self.latest_pos:
+                        logger.info(f"》 DEBUG: Position data available - Lat: {self.latest_pos['lat']:.6f}, "
+                                  f"Lon: {self.latest_pos['lon']:.6f}, "
+                                  f"Alt: {self.latest_pos['rel_alt']:.1f}m")
+                    if self.latest_imu:
+                        logger.info(f"》 DEBUG: IMU data available - X: {self.latest_imu['x']:.2f}, "
+                                  f"Y: {self.latest_imu['y']:.2f}, "
+                                  f"Z: {self.latest_imu['z']:.2f}")
 
-                self.pos_window.append((self.latest_pos["lat"], self.latest_pos["lon"], self.latest_pos["rel_alt"]))  # 3D position 
-                if len(self.pos_window) > self.window_size:             # If window is full
-                    self.pos_window.pop(0)                              # Remove oldest entry
+                # Only log metrics if we have position and IMU data
+                if self.latest_pos and self.latest_imu:
+                    # First successful metrics write
+                    if self.metrics_count == 0:
+                        logger.info("》 ✓ Started writing flight metrics to CSV")
+                    
+                    # Metrics: Altitude Stability
+                    self.alt_window.append(self.latest_pos["rel_alt"])
+                    if len(self.alt_window) > self.window_size:
+                        self.alt_window.pop(0)
 
-                alt_stab = stdev(self.alt_window) if len(self.alt_window) > 1 else 0.0
+                    self.pos_window.append((
+                        self.latest_pos["lat"], 
+                        self.latest_pos["lon"], 
+                        self.latest_pos["rel_alt"]
+                    ))
+                    if len(self.pos_window) > self.window_size:
+                        self.pos_window.pop(0)
 
-                # Metrics: Vibration / IMU Acceleration RMS
-                vib_rms = sqrt(self.latest_imu["x"]**2 + self.latest_imu["y"]**2 + self.latest_imu["z"]**2) # Vibration RMS
-                self.vib_window.append(vib_rms)                         # Vibration RMS
-                if len(self.vib_window) > self.window_size:             # If window is full
-                    self.vib_window.pop(0)                              # Remove oldest entry   
+                    alt_stab = stdev(self.alt_window) if len(self.alt_window) > 1 else 0.0
 
-                # Metrics: Position Jitter During Hover
-                if len(self.pos_window) > 1:
-                    mean_x = sum(p[0] for p in self.pos_window)/len(self.pos_window)    # Mean latitude
-                    mean_y = sum(p[1] for p in self.pos_window)/len(self.pos_window)    # Mean longitude
-                    mean_z = sum(p[2] for p in self.pos_window)/len(self.pos_window)    # Mean relative altitude
-                    jitter = sqrt(sum((p[0]-mean_x)**2 + (p[1]-mean_y)**2 + (p[2]-mean_z)**2 for p in self.pos_window)/len(self.pos_window))    # RMS jitter
-                else:
-                    jitter = 0.0
+                    # Metrics: Vibration / IMU Acceleration RMS
+                    vib_rms = sqrt(
+                        self.latest_imu["x"]**2 + 
+                        self.latest_imu["y"]**2 + 
+                        self.latest_imu["z"]**2
+                    )
+                    self.vib_window.append(vib_rms)
+                    if len(self.vib_window) > self.window_size:
+                        self.vib_window.pop(0)
 
-                # Metrics: Flight Endurance
-                battery_pct = self.latest_batt["percentage"] if self.latest_batt else 0.0   # Battery percentage
-                flight_time = (datetime.utcnow() - self.flight_start).total_seconds() if self.flight_start else 0.0   # Flight time in seconds
+                    # Metrics: Position Jitter During Hover
+                    if len(self.pos_window) > 1:
+                        mean_x = sum(p[0] for p in self.pos_window) / len(self.pos_window)
+                        mean_y = sum(p[1] for p in self.pos_window) / len(self.pos_window)
+                        mean_z = sum(p[2] for p in self.pos_window) / len(self.pos_window)
+                        jitter = sqrt(sum(
+                            (p[0]-mean_x)**2 + (p[1]-mean_y)**2 + (p[2]-mean_z)**2 
+                            for p in self.pos_window
+                        ) / len(self.pos_window))
+                    else:
+                        jitter = 0.0
 
-                # Record metrics to CSV
-                with open(self.output_csv, "a", newline="") as f:   # Append to CSV
-                    writer = csv.writer(f)                          # Create writer
-                    writer.writerow([                               # Write metrics row
-                        datetime.utcnow().isoformat(),              # Timestamp
-                        self.latest_pos["lat"],                     # Latitude
-                        self.latest_pos["lon"],                     # Longitude
-                        self.latest_pos["abs_alt"],                 # Absolute altitude
-                        self.latest_pos["rel_alt"],                 # Relative altitude
-                        vib_rms,                                    # Vibration RMS
-                        jitter,                                     # Hover jitter
-                        alt_stab,                                   # Altitude stability
-                        battery_pct,                                # Battery percentage
-                        flight_time                                 # Flight time in seconds
-                    ])
-            await asyncio.sleep(self.log_interval)
+                    # Metrics: Battery and Flight Time
+                    battery_pct = self.latest_batt["percentage"] if self.latest_batt else 0.0
+                    flight_time = (datetime.utcnow() - self.flight_start).total_seconds() if self.flight_start else 0.0
+
+                    # Record metrics to CSV
+                    try:
+                        with open(self.output_csv, "a", newline="") as f:
+                            writer = csv.writer(f)
+                            writer.writerow([
+                                datetime.utcnow().isoformat(),
+                                self.latest_pos["lat"],
+                                self.latest_pos["lon"],
+                                self.latest_pos["abs_alt"],
+                                self.latest_pos["rel_alt"],
+                                vib_rms,
+                                jitter,
+                                alt_stab,
+                                battery_pct,
+                                flight_time
+                            ])
+                        
+                        self.metrics_count += 1
+                        
+                        # Log every 100 metrics to confirm it's working
+                        if self.metrics_count % 100 == 0:
+                            logger.info(f"》 Logged {self.metrics_count} flight metrics")
+                    
+                    except Exception as e:
+                        logger.error(f"✗ Error writing metrics to CSV: {e}", exc_info=True)
+                
+                await asyncio.sleep(self.log_interval)
+        
+        except asyncio.CancelledError:
+            logger.info(f"》 FlightMetrics logger stopped (logged {self.metrics_count} total metrics)")
+            raise
+        except Exception as e:
+            logger.error(f"✗ FlightMetrics error: {e}", exc_info=True)

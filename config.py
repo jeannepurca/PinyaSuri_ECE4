@@ -14,6 +14,9 @@ FLIGHT_METRICS_CSV = LOG_DIR / "drone_flight_metrics.csv"
 PIXHAWK_ADDRESS = "serial:///dev/ttyAMA0:57600"
 CONNECTION_TIMEOUT = 30
 
+# Waypoint Detection Configuration
+WAYPOINT_DETECTION_RADIUS = 2.0  # meters
+
 # Model Configuration
 MODEL_PATH = BASE_DIR / "models" / "pinyasuri_classifier.tflite"
 MODEL_INPUT_SIZE = (224, 224)
