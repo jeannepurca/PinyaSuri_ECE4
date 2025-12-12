@@ -13,6 +13,7 @@ from pixhawk_interface import PixhawkInterface
 from flight_metrics import FlightMetrics
 from image_capture import ImageCapture
 from waypoint_detector import WaypointDetector
+from mission_reader import read_mission_waypoints  # NEW IMPORT
 
 # Ensure directories exist before logging
 config.ensure_directories()
@@ -20,7 +21,7 @@ config.ensure_directories()
 # Configure Logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    format='%(levelname)s:%(name)s:%(message)s',
     handlers=[
         logging.FileHandler(config.LOG_DIR / "test_flight.log"),
         logging.StreamHandler()
@@ -60,18 +61,18 @@ class TestFlight:
                     return False
                 await asyncio.sleep(2)
 
-        # Download mission waypoints for distance-based detection
+        # Download mission waypoints using pymavlink (bypasses MAVSDK frame issue)
         try:
-            logger.info("》》》 Downloading mission waypoints...")
-            mission_plan = await self.pixhawk.drone.mission.download_mission()
+            logger.info("》》》 Downloading mission waypoints via pymavlink...")
             
-            # Extract waypoint coordinates (skip home/takeoff/land commands)
-            waypoints = []
-            for idx, item in enumerate(mission_plan.mission_items):
-                # Command 16 = WAYPOINT, skip others (22=TAKEOFF, 20=LAND, etc.)
-                if item.command == 16 and idx > 0:  # Skip home (idx 0)
-                    waypoints.append((item.latitude_deg, item.longitude_deg, item.altitude_m))
-                    logger.info(f"  WP{len(waypoints)}: ({item.latitude_deg:.7f}, {item.longitude_deg:.7f})")
+            # Run synchronous pymavlink code in executor to avoid blocking
+            loop = asyncio.get_event_loop()
+            waypoints = await loop.run_in_executor(
+                None, 
+                read_mission_waypoints,
+                "/dev/ttyAMA0",
+                57600
+            )
             
             if len(waypoints) == 0:
                 logger.warning("⚠ No waypoints found in mission!")
@@ -250,10 +251,10 @@ class TestFlight:
         finally:
             # Cleanup Tasks
             logger.info("》》》 Stopping mission tasks...")
-            for task in [pos_task, prog_task, imu_task, batt_task, armed_task, mode_task, metrics_task]:
+            for task in [pos_task, imu_task, batt_task, armed_task, mode_task, metrics_task]:
                 task.cancel()
             await asyncio.gather(
-                pos_task, prog_task, imu_task, batt_task, armed_task, mode_task, metrics_task, 
+                pos_task, imu_task, batt_task, armed_task, mode_task, metrics_task, 
                 return_exceptions=True
             )
 

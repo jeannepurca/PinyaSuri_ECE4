@@ -1,54 +1,147 @@
-import math
+"""
+mission_reader.py
+Read mission waypoints directly from Pixhawk using pymavlink (bypasses MAVSDK frame issue)
+"""
+
+import time
 import logging
+from pymavlink import mavutil
 
-logger = logging.getLogger("WaypointDetector")
+logger = logging.getLogger("MissionReader")
 
-class WaypointDetector:
-    """Detect waypoint arrivals based on GPS distance"""
+class MissionReader:
+    """Read mission waypoints from Pixhawk using pymavlink"""
     
-    def __init__(self, waypoints, radius_meters=5.0):
-        """
-        waypoints: List of tuples [(lat, lon, alt), ...]
-        radius_meters: Detection radius in meters
-        """
-        self.waypoints = waypoints
-        self.radius = radius_meters
-        self.captured = set()
-        logger.info(f"》 WaypointDetector initialized with {len(waypoints)} waypoints, radius={radius_meters}m")
+    def __init__(self, connection_string="/dev/ttyAMA0", baudrate=57600):
+        self.connection_string = connection_string
+        self.baudrate = baudrate
+        self.master = None
     
-    def haversine_distance(self, lat1, lon1, lat2, lon2):
-        """Calculate distance between two GPS coordinates in meters"""
-        R = 6371000  # Earth radius in meters
-        
-        phi1 = math.radians(lat1)
-        phi2 = math.radians(lat2)
-        delta_phi = math.radians(lat2 - lat1)
-        delta_lambda = math.radians(lon2 - lon1)
-        
-        a = math.sin(delta_phi/2)**2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda/2)**2
-        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
-        
-        return R * c
-    
-    def check_position(self, current_lat, current_lon):
-        """
-        Check if current position is near any uncaptured waypoint.
-        Returns (waypoint_index, distance) if near one, (None, None) otherwise.
-        """
-        for idx, (wp_lat, wp_lon, wp_alt) in enumerate(self.waypoints):
-            if idx in self.captured:
-                continue
+    def connect(self, timeout=10):
+        """Connect to Pixhawk via pymavlink"""
+        try:
+            logger.info(f"》 Connecting to Pixhawk via pymavlink: {self.connection_string}:{self.baudrate}")
+            self.master = mavutil.mavlink_connection(
+                self.connection_string,
+                baud=self.baudrate
+            )
             
-            distance = self.haversine_distance(current_lat, current_lon, wp_lat, wp_lon)
+            # Wait for heartbeat
+            logger.info("》 Waiting for heartbeat...")
+            self.master.wait_heartbeat(timeout=timeout)
+            logger.info(f"✓ Heartbeat received from system {self.master.target_system}")
+            return True
             
-            if distance <= self.radius:
-                self.captured.add(idx)
-                logger.info(f"》 Waypoint {idx + 1} detected! Distance: {distance:.2f}m")
-                return idx, distance
-        
-        return None, None
+        except Exception as e:
+            logger.error(f"✗ Failed to connect: {e}")
+            return False
     
-    def reset(self):
-        """Reset captured waypoints (for testing)"""
-        self.captured.clear()
-        logger.info("》 Waypoint detector reset")
+    def download_waypoints(self):
+        """
+        Download waypoints from Pixhawk.
+        Returns: List of tuples [(lat, lon, alt), ...] for actual waypoints only
+        """
+        try:
+            # Request waypoint count
+            logger.info("》 Requesting waypoint count...")
+            self.master.waypoint_request_list_send()
+            
+            # Wait for waypoint count message
+            msg = self.master.recv_match(type='MISSION_COUNT', blocking=True, timeout=5)
+            if msg is None:
+                logger.error("✗ Timeout waiting for MISSION_COUNT")
+                return []
+            
+            waypoint_count = msg.count
+            logger.info(f"》 Mission has {waypoint_count} items")
+            
+            if waypoint_count == 0:
+                logger.warning("⚠ No waypoints in mission")
+                return []
+            
+            # Request each waypoint
+            waypoints = []
+            all_items = []
+            
+            for seq in range(waypoint_count):
+                self.master.waypoint_request_send(seq)
+                
+                msg = self.master.recv_match(type='MISSION_ITEM', blocking=True, timeout=5)
+                if msg is None:
+                    logger.warning(f"⚠ Timeout waiting for waypoint {seq}")
+                    continue
+                
+                all_items.append(msg)
+                
+                # Only extract actual waypoints (command 16 = NAV_WAYPOINT)
+                # Skip: HOME (seq 0), TAKEOFF (cmd 22), LAND (cmd 20), RTL (cmd 20)
+                if msg.command == 16 and seq > 0:  # NAV_WAYPOINT and not HOME
+                    lat = msg.x  # Latitude
+                    lon = msg.y  # Longitude
+                    alt = msg.z  # Altitude
+                    waypoints.append((lat, lon, alt))
+                    logger.info(f"  WP{len(waypoints)}: ({lat:.7f}, {lon:.7f}, {alt:.1f}m) [seq={seq}, cmd={msg.command}]")
+                else:
+                    cmd_name = self._get_command_name(msg.command)
+                    logger.info(f"  Item {seq}: {cmd_name} (cmd={msg.command}) - skipped")
+            
+            # Send ACK
+            self.master.waypoint_ack_send(0)  # 0 = MAV_MISSION_ACCEPTED
+            
+            logger.info(f"✓ Downloaded {len(waypoints)} waypoints from mission")
+            return waypoints
+            
+        except Exception as e:
+            logger.error(f"✗ Error downloading waypoints: {e}", exc_info=True)
+            return []
+    
+    def _get_command_name(self, cmd):
+        """Get human-readable command name"""
+        commands = {
+            16: "NAV_WAYPOINT",
+            20: "NAV_RETURN_TO_LAUNCH",
+            21: "NAV_LAND",
+            22: "NAV_TAKEOFF",
+            84: "NAV_VTOL_TAKEOFF",
+            85: "NAV_VTOL_LAND",
+        }
+        return commands.get(cmd, f"UNKNOWN_{cmd}")
+    
+    def close(self):
+        """Close connection"""
+        if self.master:
+            self.master.close()
+            logger.info("✓ pymavlink connection closed")
+
+
+def read_mission_waypoints(connection_string="/dev/ttyAMA0", baudrate=57600):
+    """
+    Convenience function to read waypoints.
+    Returns: List of waypoint tuples [(lat, lon, alt), ...]
+    """
+    reader = MissionReader(connection_string, baudrate)
+    
+    if not reader.connect():
+        return []
+    
+    waypoints = reader.download_waypoints()
+    reader.close()
+    
+    return waypoints
+
+
+# Test function
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+    
+    print("=" * 60)
+    print("Testing Mission Reader")
+    print("=" * 60)
+    
+    waypoints = read_mission_waypoints()
+    
+    print("\n" + "=" * 60)
+    print(f"Found {len(waypoints)} waypoints:")
+    for idx, (lat, lon, alt) in enumerate(waypoints, 1):
+        print(f"  WP{idx}: ({lat:.7f}, {lon:.7f}, {alt:.1f}m)")
+    print("=" * 60)
