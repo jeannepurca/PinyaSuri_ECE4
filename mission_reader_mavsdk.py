@@ -24,8 +24,13 @@ async def read_mission_waypoints_mavsdk(pixhawk_interface):
         
         # Try mission_raw first (handles all frame types)
         try:
-            mission_import_data = await drone.mission_raw.download_mission()
-            mission_items = mission_import_data.mission_items
+            mission_data = await drone.mission_raw.download_mission()
+            
+            # mission_raw.download_mission() returns a list directly
+            if isinstance(mission_data, list):
+                mission_items = mission_data
+            else:
+                mission_items = mission_data.mission_items
             
             logger.info(f"》 Mission has {len(mission_items)} items")
             
