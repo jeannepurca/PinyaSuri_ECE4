@@ -18,18 +18,11 @@ async def read_mission_waypoints_mavsdk(pixhawk_interface):
     """
     try:
         drone = pixhawk_interface.drone
-        
-        logger.info("》 Requesting mission via MAVSDK MAVLink passthrough...")
-        
-        # Subscribe to MAVLink messages
-        waypoint_count = 0
         waypoints = []
-        mission_items = []
         
-        # Request mission list
-        await drone.mission_raw.subscribe_mission_count(lambda count: None)
+        logger.info("》 Requesting mission via MAVSDK mission_raw...")
         
-        # Use mission_raw to download mission
+        # Try mission_raw first (handles all frame types)
         try:
             mission_import_data = await drone.mission_raw.download_mission()
             mission_items = mission_import_data.mission_items
@@ -45,7 +38,7 @@ async def read_mission_waypoints_mavsdk(pixhawk_interface):
                 # Command 16 = NAV_WAYPOINT
                 # Skip HOME (seq 0), TAKEOFF (cmd 22), LAND (cmd 21), RTL (cmd 20)
                 if item.command == 16 and seq > 0:
-                    # mission_raw uses different field names
+                    # mission_raw uses int32 format (degrees * 1e7)
                     lat = item.x / 1e7  # Convert from int32 to degrees
                     lon = item.y / 1e7  # Convert from int32 to degrees
                     alt = item.z        # Altitude in meters
@@ -59,8 +52,8 @@ async def read_mission_waypoints_mavsdk(pixhawk_interface):
             logger.info(f"✓ Downloaded {len(waypoints)} waypoints from mission")
             return waypoints
             
-        except Exception as download_error:
-            logger.error(f"✗ Error with mission_raw download: {download_error}")
+        except Exception as raw_error:
+            logger.warning(f"⚠ mission_raw failed: {raw_error}")
             
             # Fallback: Try standard mission download but handle frame errors
             try:
