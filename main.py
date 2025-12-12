@@ -143,7 +143,6 @@ class PinyaSuri:
         
         # Create Queues for Telemetry
         pos_queue = asyncio.Queue()
-        prog_queue = asyncio.Queue()
         imu_queue = asyncio.Queue()
         battery_queue = asyncio.Queue()
         armed_queue = asyncio.Queue()
@@ -151,7 +150,6 @@ class PinyaSuri:
         
         # Start Telemetry Subscriptions
         pos_task = asyncio.create_task(self.pixhawk.subscribe_positions(pos_queue))
-        prog_task = asyncio.create_task(self.pixhawk.subscribe_mission_progress(prog_queue))
         imu_task = asyncio.create_task(self.pixhawk.subscribe_imu_accel(imu_queue))
         batt_task = asyncio.create_task(self.pixhawk.subscribe_battery(battery_queue))
         armed_task = asyncio.create_task(self.pixhawk.subscribe_armed(armed_queue))
