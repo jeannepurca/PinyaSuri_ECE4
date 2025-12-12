@@ -12,6 +12,7 @@ import config
 from pixhawk_interface import PixhawkInterface
 from flight_metrics import FlightMetrics
 from image_capture import ImageCapture
+from waypoint_detector import WaypointDetector
 
 # Ensure directories exist before logging
 config.ensure_directories()
@@ -35,6 +36,7 @@ class TestFlight:
         self.pixhawk: Optional[PixhawkInterface] = None
         self.camera: Optional[ImageCapture] = None
         self.metrics_logger: Optional[FlightMetrics] = None
+        self.waypoint_detector: Optional[WaypointDetector] = None
         self.shutdown_event = asyncio.Event()
         self._capture_lock = asyncio.Lock()
 
@@ -58,6 +60,33 @@ class TestFlight:
                     return False
                 await asyncio.sleep(2)
 
+        # Download mission waypoints for distance-based detection
+        try:
+            logger.info("》》》 Downloading mission waypoints...")
+            mission_plan = await self.pixhawk.drone.mission.download_mission()
+            
+            # Extract waypoint coordinates (skip home/takeoff/land commands)
+            waypoints = []
+            for idx, item in enumerate(mission_plan.mission_items):
+                # Command 16 = WAYPOINT, skip others (22=TAKEOFF, 20=LAND, etc.)
+                if item.command == 16 and idx > 0:  # Skip home (idx 0)
+                    waypoints.append((item.latitude_deg, item.longitude_deg, item.altitude_m))
+                    logger.info(f"  WP{len(waypoints)}: ({item.latitude_deg:.7f}, {item.longitude_deg:.7f})")
+            
+            if len(waypoints) == 0:
+                logger.warning("⚠ No waypoints found in mission!")
+                logger.warning("⚠ System will run but won't capture images")
+                self.waypoint_detector = None
+            else:
+                logger.info(f"✓ Loaded {len(waypoints)} waypoints for detection")
+                # Initialize waypoint detector with 5m radius
+                self.waypoint_detector = WaypointDetector(waypoints, radius_meters=5.0)
+                
+        except Exception as e:
+            logger.warning(f"⚠ Could not download mission: {e}")
+            logger.warning("⚠ Distance-based detection disabled")
+            self.waypoint_detector = None
+
         # Initialize Camera
         try:
             logger.info("》》》 Initializing Camera...")
@@ -78,10 +107,6 @@ class TestFlight:
             output_csv=str(config.FLIGHT_METRICS_CSV)
         )
 
-        # Request mission count from Pixhawk (for Mission Planner missions)
-        await self.pixhawk.request_mission_count()
-        await asyncio.sleep(1)
-
         return True
 
     def _initialize_capture_log(self):
@@ -91,7 +116,7 @@ class TestFlight:
         if not capture_log.exists():
             header = [
                 "timestamp_utc", "image_path", "lat", "lon", 
-                "abs_alt_m", "rel_alt_m", "mission_item_current", "mission_item_total"
+                "abs_alt_m", "rel_alt_m", "waypoint_number", "total_waypoints"
             ]
             
             with open(capture_log, "w", newline="") as f:
@@ -100,7 +125,7 @@ class TestFlight:
             logger.info(f"》 Created image capture log: {capture_log}")
     
     async def run_mission(self):
-        """Main mission loop: monitor progress and capture images"""
+        """Main mission loop with distance-based waypoint detection"""
         
         # Create Queues for Telemetry
         pos_queue = asyncio.Queue()
@@ -127,17 +152,15 @@ class TestFlight:
         metrics_task = asyncio.create_task(self.metrics_logger.run())
 
         # Mission State Variables
-        last_progress = -1
-        captured_waypoints = set()
         latest_pos = None
-        mission_total = 0
         is_armed = False
         mission_started = False
         was_armed_before = False
         current_flight_mode = "UNKNOWN"
+        check_interval = 0.5  # Check position every 500ms
+        last_check = 0
 
         # DEBUG: Counters
-        progress_update_count = 0
         position_update_count = 0
         mode_update_count = 0
         
@@ -154,7 +177,6 @@ class TestFlight:
                     while True:
                         armed_data = armed_queue.get_nowait()
                         is_armed = armed_data["armed"]
-                        logger.debug(f"🔧 DEBUG: Armed status - {is_armed}")
                         
                         # Start monitoring when armed
                         if is_armed and not mission_started:
@@ -168,9 +190,9 @@ class TestFlight:
                         if was_armed_before and not is_armed:
                             logger.info("=" * 60)
                             logger.info("🛬 DRONE DISARMED - Mission complete.")
-                            logger.info(f"》 DEBUG: Total progress updates: {progress_update_count}")
                             logger.info(f"》 DEBUG: Total position updates: {position_update_count}")
-                            logger.info(f"》 DEBUG: Captured waypoints: {sorted(captured_waypoints)}")
+                            if self.waypoint_detector:
+                                logger.info(f"》 DEBUG: Captured waypoints: {sorted([x+1 for x in self.waypoint_detector.captured])}")
                             logger.info("》》》 Shutting down in 5 seconds...")
                             logger.info("=" * 60)
                             await asyncio.sleep(5)
@@ -197,48 +219,30 @@ class TestFlight:
                 except asyncio.QueueEmpty:
                     pass
 
-                # Only process mission if armed
-                if not mission_started:
-                    await asyncio.sleep(config.MAIN_LOOP_INTERVAL)
-                    continue
-
-                # Process Mission Progress Updates
-                try:
-                    while True:
-                        prog = prog_queue.get_nowait()
-                        progress_update_count += 1
-                        current_waypoint = prog["current"]
-                        mission_total = prog["total"]
+                # Only check waypoints if armed and we have position data
+                if mission_started and latest_pos and self.waypoint_detector:
+                    current_time = asyncio.get_event_loop().time()
+                    
+                    if current_time - last_check >= check_interval:
+                        last_check = current_time
                         
-                        # Only process if waypoint changed
-                        if current_waypoint != last_progress:
-                            logger.info(f"》 Mission Progress: Waypoint {current_waypoint}/{mission_total}")
-                            last_progress = current_waypoint
+                        # Check if near any waypoint
+                        wp_idx, distance = self.waypoint_detector.check_position(
+                            latest_pos["lat"],
+                            latest_pos["lon"]
+                        )
+                        
+                        if wp_idx is not None:
+                            logger.info("=" * 60)
+                            logger.info(f"📍 WAYPOINT {wp_idx + 1} DETECTED!")
+                            logger.info(f"   Distance: {distance:.2f}m from waypoint")
+                            logger.info("=" * 60)
                             
-                            # Capture image if this waypoint hasn't been processed yet
-                            if current_waypoint > 0 and current_waypoint not in captured_waypoints:
-                                # Use lock to prevent duplicate captures
-                                async with self._capture_lock:
-                                    if current_waypoint not in captured_waypoints:
-                                        logger.info(f"》 NEW WAYPOINT: {current_waypoint} - Capturing")
-                                        
-                                        # Wait briefly for position to stabilize
-                                        await asyncio.sleep(0.2)
-                                        
-                                        # Get most recent position
-                                        capture_pos = latest_pos
-                                        
-                                        await self._capture_at_waypoint(
-                                            current_waypoint,
-                                            mission_total,
-                                            capture_pos
-                                        )
-                                        captured_waypoints.add(current_waypoint)
-                            else:
-                                logger.debug(f"🔧 Waypoint {current_waypoint} already captured")
-                        
-                except asyncio.QueueEmpty:
-                    pass
+                            await self._capture_at_waypoint(
+                                wp_idx + 1,  # Human-readable numbering (1-indexed)
+                                len(self.waypoint_detector.waypoints),
+                                latest_pos
+                            )
                 
                 await asyncio.sleep(config.MAIN_LOOP_INTERVAL)
         
