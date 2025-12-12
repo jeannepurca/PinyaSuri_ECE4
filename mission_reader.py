@@ -85,10 +85,18 @@ class MissionReader:
                     cmd_name = self._get_command_name(msg.command)
                     logger.info(f"  Item {seq}: {cmd_name} (cmd={msg.command}) - skipped")
             
-            # Send ACK
-            self.master.waypoint_ack_send(0)  # 0 = MAV_MISSION_ACCEPTED
-            
             logger.info(f"✓ Downloaded {len(waypoints)} waypoints from mission")
+            
+            # Send ACK (not critical if this fails)
+            try:
+                self.master.mav.mission_ack_send(
+                    self.master.target_system,
+                    self.master.target_component,
+                    0  # MAV_MISSION_ACCEPTED
+                )
+            except Exception as ack_error:
+                logger.warning(f"⚠ Could not send mission ACK: {ack_error}")
+            
             return waypoints
             
         except Exception as e:
