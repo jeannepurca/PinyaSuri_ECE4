@@ -1,6 +1,13 @@
 from pymavlink import mavutil
 
-conn = mavutil.mavlink_connection('/dev/ttyAMA0:57600')
+# Connect to Pixhawk
+conn = mavutil.mavlink_connection(device='/dev/ttyAMA0', baud=57600)
+
+# Wait for heartbeat
 print("Waiting for heartbeat...")
-conn.wait_heartbeat(timeout=10)
-print(f"✓ Connected! System ID: {conn.target_system}")
+conn.wait_heartbeat()
+print("Heartbeat received from system %u component %u" % (conn.target_system, conn.target_component))
+
+# Try reading one message
+msg = conn.recv_match(blocking=True)
+print(msg)
