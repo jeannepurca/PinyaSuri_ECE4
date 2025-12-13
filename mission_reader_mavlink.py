@@ -1,8 +1,4 @@
 #!/usr/bin/env python3
-"""
-mission_reader_mavlink.py
-Read mission waypoints using direct MAVLink (no MAVSDK dependency)
-"""
 
 import asyncio
 import logging

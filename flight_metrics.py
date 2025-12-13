@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import asyncio
 import csv
 import os
@@ -6,7 +8,6 @@ from statistics import stdev
 import logging
 from datetime import datetime
 
-# Configure Logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("FlightMetrics")
 
@@ -34,11 +35,11 @@ class FlightMetrics:
                 ])
             logger.info(f"》 Created flight metrics CSV: {self.output_csv}")
 
-        # Queues will be set by main code
-        self.pos_queue = None
-        self.imu_queue = None
-        self.battery_queue = None
-        self.armed_queue = None
+        # Create dedicated queues for metrics logger
+        self.pos_queue = asyncio.Queue()
+        self.imu_queue = asyncio.Queue()
+        self.battery_queue = asyncio.Queue()
+        self.armed_queue = asyncio.Queue()
         
         # State tracking
         self.latest_pos = None
@@ -46,8 +47,8 @@ class FlightMetrics:
         self.latest_batt = None
         self.armed = False
         self.flight_start = None
-        self.metrics_count = 0  # DEBUG: Track how many metrics logged
-        self.debug_check_count = 0  # DEBUG: Track how many times we checked for data
+        self.metrics_count = 0
+        self.debug_check_count = 0
 
     async def run(self):
         """Main metrics logging loop"""
@@ -55,63 +56,55 @@ class FlightMetrics:
         
         try:
             while True:
-                # Update latest data from queues
-                if self.pos_queue:
-                    try:
-                        while True:
-                            self.latest_pos = self.pos_queue.get_nowait()
-                    except asyncio.QueueEmpty:
-                        pass
+                # Update latest data from OUR queues
+                try:
+                    while True:
+                        self.latest_pos = self.pos_queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    pass
                 
-                if self.imu_queue:
-                    try:
-                        while True:
-                            self.latest_imu = self.imu_queue.get_nowait()
-                    except asyncio.QueueEmpty:
-                        pass
+                try:
+                    while True:
+                        self.latest_imu = self.imu_queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    pass
                 
-                if self.battery_queue:
-                    try:
-                        while True:
-                            self.latest_batt = self.battery_queue.get_nowait()
-                    except asyncio.QueueEmpty:
-                        pass
+                try:
+                    while True:
+                        self.latest_batt = self.battery_queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    pass
                 
-                if self.armed_queue:
-                    try:
-                        while True:
-                            armed_status = self.armed_queue.get_nowait()
-                            new_armed = armed_status["armed"]
-                            
-                            # Detect arming (start new flight timer)
-                            if new_armed and not self.armed:
-                                self.flight_start = datetime.utcnow()
-                                logger.info("》 Flight timer started")
-                            
-                            # Detect disarming (reset timer for next flight)
-                            if not new_armed and self.armed:
-                                self.flight_start = None
-                                logger.info("》 Flight timer reset")
-                            
-                            self.armed = new_armed
-                    except asyncio.QueueEmpty:
-                        pass
+                try:
+                    while True:
+                        armed_status = self.armed_queue.get_nowait()
+                        new_armed = armed_status["armed"]
+                        
+                        # Detect arming (start new flight timer)
+                        if new_armed and not self.armed:
+                            self.flight_start = datetime.utcnow()
+                            logger.info("》 Flight timer started")
+                        
+                        # Detect disarming (reset timer for next flight)
+                        if not new_armed and self.armed:
+                            self.flight_start = None
+                            logger.info("》 Flight timer reset")
+                        
+                        self.armed = new_armed
+                except asyncio.QueueEmpty:
+                    pass
 
                 # DEBUG: Check data availability every 20 cycles (10 seconds at 0.5s interval)
                 self.debug_check_count += 1
                 if self.metrics_count == 0 and self.debug_check_count % 20 == 0:
-                    logger.info(f"》 DEBUG: Waiting for data - Pos: {self.latest_pos is not None}, "
-                              f"IMU: {self.latest_imu is not None}, "
-                              f"Battery: {self.latest_batt is not None}, "
-                              f"Armed: {self.armed}")
+                    logger.info(f"》 DEBUG FlightMetrics: Pos={self.latest_pos is not None}, "
+                              f"IMU={self.latest_imu is not None}, "
+                              f"Battery={self.latest_batt is not None}, "
+                              f"Armed={self.armed}")
                     if self.latest_pos:
-                        logger.info(f"》 DEBUG: Position data available - Lat: {self.latest_pos['lat']:.6f}, "
-                                  f"Lon: {self.latest_pos['lon']:.6f}, "
-                                  f"Alt: {self.latest_pos['rel_alt']:.1f}m")
-                    if self.latest_imu:
-                        logger.info(f"》 DEBUG: IMU data available - X: {self.latest_imu['x']:.2f}, "
-                                  f"Y: {self.latest_imu['y']:.2f}, "
-                                  f"Z: {self.latest_imu['z']:.2f}")
+                        logger.info(f"》 Position: Lat={self.latest_pos['lat']:.6f}, "
+                                  f"Lon={self.latest_pos['lon']:.6f}, "
+                                  f"Alt={self.latest_pos['rel_alt']:.1f}m")
 
                 # Only log metrics if we have position and IMU data
                 if self.latest_pos and self.latest_imu:

@@ -9,11 +9,11 @@ from typing import Optional
 from pathlib import Path
 
 import config
-from pixhawk_interface import PixhawkInterface
+from pixhawk_mavlink import PixhawkMAVLink as PixhawkInterface
 from flight_metrics import FlightMetrics
 from image_capture import ImageCapture
 from waypoint_detector import WaypointDetector
-from mission_reader_mavsdk import read_mission_waypoints_mavsdk
+from mission_reader_mavlink import read_mission_waypoints_mavlink
 
 # Ensure directories exist before logging
 config.ensure_directories()
@@ -46,13 +46,13 @@ class TestFlight:
 
         config.ensure_directories()
         
-        # Initialize Pixhawk
+        # Initialize Pixhawk via MAVLink UDP
         for attempt in range(1, max_retries + 1):
             try:
-                logger.info(f"》》》 Initializing Pixhawk (attempt {attempt}/{max_retries})...")
-                self.pixhawk = PixhawkInterface(system_address=config.PIXHAWK_ADDRESS)
+                logger.info(f"》》》 Initializing Pixhawk MAVLink (attempt {attempt}/{max_retries})...")
+                self.pixhawk = PixhawkInterface(connection_string=config.MAVLINK_CONNECTION)
                 await self.pixhawk.connect(timeout=config.CONNECTION_TIMEOUT)
-                logger.info("✓ Pixhawk connected successfully.")
+                logger.info("✓ Pixhawk MAVLink connected successfully.")
                 break
             except Exception as e:
                 logger.error(f"✗ Pixhawk connection failed: {e}")
@@ -61,11 +61,11 @@ class TestFlight:
                     return False
                 await asyncio.sleep(2)
 
-        # Download mission waypoints using MAVSDK
+        # Download mission waypoints using direct MAVLink
         try:
-            logger.info("》》》 Downloading mission waypoints via MAVSDK...")
+            logger.info("》》》 Downloading mission waypoints via MAVLink...")
             
-            waypoints = await read_mission_waypoints_mavsdk(self.pixhawk)
+            waypoints = await read_mission_waypoints_mavlink(self.pixhawk)
             
             if len(waypoints) == 0:
                 logger.warning("⚠ No waypoints found in mission!")
@@ -73,8 +73,7 @@ class TestFlight:
                 self.waypoint_detector = None
             else:
                 logger.info(f"✓ Loaded {len(waypoints)} waypoints for detection")
-                # INCREASED detection radius to 5 meters for better GPS tolerance
-                self.waypoint_detector = WaypointDetector(waypoints, radius_meters=5.0)
+                self.waypoint_detector = WaypointDetector(waypoints, radius_meters=config.WAYPOINT_DETECTION_RADIUS)
                 
                 # Log all waypoints for debugging
                 logger.info("=" * 60)
@@ -129,27 +128,39 @@ class TestFlight:
     async def run_mission(self):
         """Main mission loop with continuous cycle support"""
         
-        # Create Queues for Telemetry
-        pos_queue = asyncio.Queue()
-        imu_queue = asyncio.Queue()
-        battery_queue = asyncio.Queue()
-        armed_queue = asyncio.Queue()
-        mode_queue = asyncio.Queue()
-        in_air_queue = asyncio.Queue()
+        # Create Queues for Telemetry - Main Loop
+        main_pos_queue = asyncio.Queue()
+        main_imu_queue = asyncio.Queue()
+        main_battery_queue = asyncio.Queue()
+        main_armed_queue = asyncio.Queue()
+        main_mode_queue = asyncio.Queue()
+        main_in_air_queue = asyncio.Queue()
         
-        # Start Telemetry Subscriptions
-        pos_task = asyncio.create_task(self.pixhawk.subscribe_positions(pos_queue))
-        imu_task = asyncio.create_task(self.pixhawk.subscribe_imu_accel(imu_queue))
-        batt_task = asyncio.create_task(self.pixhawk.subscribe_battery(battery_queue))
-        armed_task = asyncio.create_task(self.pixhawk.subscribe_armed(armed_queue))
-        mode_task = asyncio.create_task(self.pixhawk.subscribe_flight_mode(mode_queue))
-        in_air_task = asyncio.create_task(self.pixhawk.subscribe_in_air(in_air_queue))
+        # Create SEPARATE Queues for Metrics Logger
+        metrics_pos_queue = asyncio.Queue()
+        metrics_imu_queue = asyncio.Queue()
+        metrics_battery_queue = asyncio.Queue()
+        metrics_armed_queue = asyncio.Queue()
+        
+        # Start Telemetry Subscriptions - Main Loop
+        pos_task = asyncio.create_task(self.pixhawk.subscribe_positions(main_pos_queue))
+        imu_task = asyncio.create_task(self.pixhawk.subscribe_imu_accel(main_imu_queue))
+        batt_task = asyncio.create_task(self.pixhawk.subscribe_battery(main_battery_queue))
+        armed_task = asyncio.create_task(self.pixhawk.subscribe_armed(main_armed_queue))
+        mode_task = asyncio.create_task(self.pixhawk.subscribe_flight_mode(main_mode_queue))
+        in_air_task = asyncio.create_task(self.pixhawk.subscribe_in_air(main_in_air_queue))
+        
+        # Start SEPARATE Telemetry Subscriptions - Metrics Logger
+        metrics_pos_task = asyncio.create_task(self.pixhawk.subscribe_positions(metrics_pos_queue))
+        metrics_imu_task = asyncio.create_task(self.pixhawk.subscribe_imu_accel(metrics_imu_queue))
+        metrics_batt_task = asyncio.create_task(self.pixhawk.subscribe_battery(metrics_battery_queue))
+        metrics_armed_task = asyncio.create_task(self.pixhawk.subscribe_armed(metrics_armed_queue))
 
-        # Pass queues to metrics logger
-        self.metrics_logger.pos_queue = pos_queue
-        self.metrics_logger.imu_queue = imu_queue
-        self.metrics_logger.battery_queue = battery_queue
-        self.metrics_logger.armed_queue = armed_queue
+        # Pass SEPARATE queues to metrics logger
+        self.metrics_logger.pos_queue = metrics_pos_queue
+        self.metrics_logger.imu_queue = metrics_imu_queue
+        self.metrics_logger.battery_queue = metrics_battery_queue
+        self.metrics_logger.armed_queue = metrics_armed_queue
 
         metrics_task = asyncio.create_task(self.metrics_logger.run())
 
@@ -160,15 +171,15 @@ class TestFlight:
         mission_started = False
         was_armed_before = False
         current_flight_mode = "UNKNOWN"
-        check_interval = 0.5
+        check_interval = 0.2
         last_check = 0
         flight_number = 0
-        last_distance_log = 0  # NEW: For periodic distance logging
+        last_distance_log = 0
 
         # DEBUG: Counters
         position_update_count = 0
         mode_update_count = 0
-        waypoint_check_count = 0  # NEW: Count waypoint checks
+        waypoint_check_count = 0
         
         logger.info("=" * 60)
         logger.info("🍍 PINYASURI TEST FLIGHT READY! 🚁")
@@ -181,7 +192,7 @@ class TestFlight:
                 # Process Armed Status
                 try:
                     while True:
-                        armed_data = armed_queue.get_nowait()
+                        armed_data = main_armed_queue.get_nowait()
                         new_armed = armed_data["armed"]
                         
                         # Detect ARM transition (start new flight)
@@ -224,7 +235,7 @@ class TestFlight:
                 # Process Position Updates
                 try:
                     while True:
-                        latest_pos = pos_queue.get_nowait()
+                        latest_pos = main_pos_queue.get_nowait()
                         position_update_count += 1
                 except asyncio.QueueEmpty:
                     pass
@@ -232,7 +243,7 @@ class TestFlight:
                 # Process Flight Mode Updates
                 try:
                     while True:
-                        mode = mode_queue.get_nowait()
+                        mode = main_mode_queue.get_nowait()
                         mode_update_count += 1
                         if mode != current_flight_mode:
                             current_flight_mode = mode
@@ -243,7 +254,7 @@ class TestFlight:
                 # Process In-Air Status
                 try:
                     while True:
-                        new_in_air = in_air_queue.get_nowait()
+                        new_in_air = main_in_air_queue.get_nowait()
                         
                         # Log transitions
                         if new_in_air and not is_in_air:
@@ -255,7 +266,7 @@ class TestFlight:
                 except asyncio.QueueEmpty:
                     pass
 
-                # MODIFIED: Check waypoints with better debugging
+                # Check waypoints with periodic status logging
                 current_time = asyncio.get_event_loop().time()
                 
                 # Log current status every 5 seconds when armed
@@ -288,8 +299,7 @@ class TestFlight:
                     
                     logger.info(f"[STATUS] {' | '.join(status)}")
 
-                # SIMPLIFIED: Check waypoints if we have basic requirements
-                # Remove is_in_air requirement temporarily for debugging
+                # Check waypoints if we have position data
                 if mission_started and latest_pos and self.waypoint_detector:
                     if current_time - last_check >= check_interval:
                         last_check = current_time
@@ -321,14 +331,16 @@ class TestFlight:
             logger.error(f"✗ Error in mission loop: {e}", exc_info=True)
         
         finally:
-            # Cleanup Tasks
+            # Cleanup ALL Tasks (main + metrics)
             logger.info("》》》 Stopping mission tasks...")
-            for task in [pos_task, imu_task, batt_task, armed_task, mode_task, in_air_task, metrics_task]:
+            all_tasks = [
+                pos_task, imu_task, batt_task, armed_task, mode_task, in_air_task,
+                metrics_pos_task, metrics_imu_task, metrics_batt_task, metrics_armed_task,
+                metrics_task
+            ]
+            for task in all_tasks:
                 task.cancel()
-            await asyncio.gather(
-                pos_task, imu_task, batt_task, armed_task, mode_task, in_air_task, metrics_task, 
-                return_exceptions=True
-            )
+            await asyncio.gather(*all_tasks, return_exceptions=True)
 
     async def _capture_at_waypoint(self, waypoint_idx: int, mission_total: int, 
                                    position: Optional[dict], flight_number: int):
