@@ -14,7 +14,7 @@ FLIGHT_METRICS_CSV = LOG_DIR / "drone_flight_metrics.csv"
 
 # MAVLink Configuration (NEW)
 # MAVProxy will forward telemetry to this UDP port
-MAVLINK_CONNECTION = "udp:127.0.0.1:14551"
+MAVLINK_CONNECTION = "udpout:127.0.0.1:14551"
 CONNECTION_TIMEOUT = 30
 
 # Legacy Pixhawk Config (for reference only)
