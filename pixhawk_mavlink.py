@@ -37,24 +37,26 @@ class PixhawkMAVLink:
         logger.info(f"》》》 Connecting to MAVLink: {self.connection_string}")
         
         try:
-            # Create MAVLink connection (blocking, so run in executor)
-            loop = asyncio.get_event_loop()
-            self.master = await loop.run_in_executor(
-                None, 
-                mavutil.mavlink_connection,
-                self.connection_string
-            )
+            # Create MAVLink connection (non-blocking)
+            self.master = mavutil.mavlink_connection(self.connection_string)
             
-            # Wait for heartbeat
-            logger.info("》 Waiting for heartbeat...")
+            if not self.master:
+                raise Exception("Failed to create MAVLink connection")
+            
+            logger.info("》 Connection object created, waiting for heartbeat...")
+            
+            # Wait for heartbeat with proper async handling
             start = time.time()
+            heartbeat_received = False
             
             while time.time() - start < timeout:
-                msg = await loop.run_in_executor(None, self.master.recv_match, ['HEARTBEAT'], True, 1.0)
+                # Use non-blocking recv_match
+                msg = self.master.recv_match(type='HEARTBEAT', blocking=False)
                 
                 if msg:
                     logger.info(f"✓ Heartbeat received from system {msg.get_srcSystem()}")
                     self._connected = True
+                    heartbeat_received = True
                     
                     # Request data streams at 5 Hz
                     await self._request_data_streams()
@@ -62,17 +64,18 @@ class PixhawkMAVLink:
                     logger.info("✓ MAVLink connection established")
                     return
                 
+                # Don't block the event loop
                 await asyncio.sleep(0.1)
             
-            raise TimeoutError("No heartbeat received within timeout")
-            
+            if not heartbeat_received:
+                raise TimeoutError("No heartbeat received within timeout")
+                
         except Exception as e:
             logger.error(f"✗ Failed to connect: {e}")
             raise
     
     async def _request_data_streams(self):
         """Request telemetry streams at specified rates"""
-        loop = asyncio.get_event_loop()
         
         # Request 5 Hz for position, attitude, and system status
         for stream_id in [
@@ -80,31 +83,28 @@ class PixhawkMAVLink:
             mavutil.mavlink.MAV_DATA_STREAM_EXTRA1,
             mavutil.mavlink.MAV_DATA_STREAM_EXTENDED_STATUS
         ]:
-            await loop.run_in_executor(
-                None,
-                self.master.mav.request_data_stream_send,
+            self.master.mav.request_data_stream_send(
                 self.master.target_system,
                 self.master.target_component,
                 stream_id,
                 5,  # 5 Hz
                 1   # Start streaming
             )
+            # Small delay between requests
+            await asyncio.sleep(0.01)
         
         logger.info("》 Requested telemetry streams at 5 Hz")
     
     async def subscribe_positions(self, pos_queue: asyncio.Queue):
         """Subscribe to GPS position updates (GLOBAL_POSITION_INT)"""
         logger.info("》》》 Starting position telemetry subscription...")
-        loop = asyncio.get_event_loop()
         
         try:
             while True:
-                msg = await loop.run_in_executor(
-                    None,
-                    self.master.recv_match,
-                    ['GLOBAL_POSITION_INT'],
-                    True,
-                    1.0
+                # Non-blocking receive
+                msg = self.master.recv_match(
+                    type='GLOBAL_POSITION_INT',
+                    blocking=False
                 )
                 
                 if msg:
@@ -120,6 +120,7 @@ class PixhawkMAVLink:
                     self.latest_position = position
                     await pos_queue.put(position)
                 
+                # Don't block the event loop
                 await asyncio.sleep(0.01)
                 
         except asyncio.CancelledError:
@@ -131,16 +132,13 @@ class PixhawkMAVLink:
     async def subscribe_imu_accel(self, imu_queue: asyncio.Queue):
         """Subscribe to IMU accelerometer data (SCALED_IMU2 or RAW_IMU)"""
         logger.info("》》》 Starting IMU subscription...")
-        loop = asyncio.get_event_loop()
         
         try:
             while True:
-                msg = await loop.run_in_executor(
-                    None,
-                    self.master.recv_match,
-                    ['SCALED_IMU2', 'RAW_IMU'],
-                    True,
-                    1.0
+                # Non-blocking receive
+                msg = self.master.recv_match(
+                    type=['SCALED_IMU2', 'RAW_IMU'],
+                    blocking=False
                 )
                 
                 if msg:
@@ -154,6 +152,7 @@ class PixhawkMAVLink:
                     
                     await imu_queue.put(imu_data)
                 
+                # Don't block the event loop
                 await asyncio.sleep(0.01)
                 
         except asyncio.CancelledError:
@@ -164,16 +163,14 @@ class PixhawkMAVLink:
     
     async def subscribe_battery(self, battery_queue: asyncio.Queue):
         """Subscribe to battery status (SYS_STATUS)"""
-        loop = asyncio.get_event_loop()
+        logger.info("》》》 Starting battery subscription...")
         
         try:
             while True:
-                msg = await loop.run_in_executor(
-                    None,
-                    self.master.recv_match,
-                    ['SYS_STATUS'],
-                    True,
-                    1.0
+                # Non-blocking receive
+                msg = self.master.recv_match(
+                    type='SYS_STATUS',
+                    blocking=False
                 )
                 
                 if msg:
@@ -186,7 +183,8 @@ class PixhawkMAVLink:
                     self.latest_battery = battery
                     await battery_queue.put(battery)
                 
-                await asyncio.sleep(0.5)
+                # Don't block the event loop
+                await asyncio.sleep(0.01)
                 
         except asyncio.CancelledError:
             logger.info("⚠ Battery subscription stopped.")
@@ -197,16 +195,13 @@ class PixhawkMAVLink:
     async def subscribe_armed(self, armed_queue: asyncio.Queue):
         """Subscribe to armed status (HEARTBEAT)"""
         logger.info("》》》 Starting armed status subscription...")
-        loop = asyncio.get_event_loop()
         
         try:
             while True:
-                msg = await loop.run_in_executor(
-                    None,
-                    self.master.recv_match,
-                    ['HEARTBEAT'],
-                    True,
-                    1.0
+                # Non-blocking receive
+                msg = self.master.recv_match(
+                    type='HEARTBEAT',
+                    blocking=False
                 )
                 
                 if msg:
@@ -221,7 +216,8 @@ class PixhawkMAVLink:
                         
                         await armed_queue.put({"armed": is_armed})
                 
-                await asyncio.sleep(0.2)
+                # Don't block the event loop
+                await asyncio.sleep(0.01)
                 
         except asyncio.CancelledError:
             logger.info("⚠ Armed subscription stopped.")
@@ -232,18 +228,15 @@ class PixhawkMAVLink:
     async def subscribe_flight_mode(self, mode_queue: asyncio.Queue):
         """Subscribe to flight mode changes (HEARTBEAT)"""
         logger.info("》》》 Starting flight mode subscription...")
-        loop = asyncio.get_event_loop()
         
         last_mode = None
         
         try:
             while True:
-                msg = await loop.run_in_executor(
-                    None,
-                    self.master.recv_match,
-                    ['HEARTBEAT'],
-                    True,
-                    1.0
+                # Non-blocking receive
+                msg = self.master.recv_match(
+                    type='HEARTBEAT',
+                    blocking=False
                 )
                 
                 if msg:
@@ -255,7 +248,8 @@ class PixhawkMAVLink:
                         self.latest_flight_mode = mode
                         await mode_queue.put(mode)
                 
-                await asyncio.sleep(0.2)
+                # Don't block the event loop
+                await asyncio.sleep(0.01)
                 
         except asyncio.CancelledError:
             logger.info("⚠ Flight mode subscription stopped.")
@@ -265,16 +259,14 @@ class PixhawkMAVLink:
     
     async def subscribe_in_air(self, in_air_queue: asyncio.Queue):
         """Subscribe to in-air status (EXTENDED_SYS_STATE)"""
-        loop = asyncio.get_event_loop()
+        logger.info("》》》 Starting in-air subscription...")
         
         try:
             while True:
-                msg = await loop.run_in_executor(
-                    None,
-                    self.master.recv_match,
-                    ['EXTENDED_SYS_STATE'],
-                    True,
-                    1.0
+                # Non-blocking receive
+                msg = self.master.recv_match(
+                    type='EXTENDED_SYS_STATE',
+                    blocking=False
                 )
                 
                 if msg:
@@ -285,7 +277,8 @@ class PixhawkMAVLink:
                         self.is_in_air = is_in_air
                         await in_air_queue.put(is_in_air)
                 
-                await asyncio.sleep(0.2)
+                # Don't block the event loop
+                await asyncio.sleep(0.01)
                 
         except asyncio.CancelledError:
             logger.info("⚠ In-air subscription stopped.")
@@ -293,13 +286,12 @@ class PixhawkMAVLink:
         except Exception as e:
             logger.error(f"In-air subscription error: {e}", exc_info=True)
     
-    async def download_mission(self) -> list[Tuple[float, float, float]]:
+    async def download_mission(self) -> list:
         """
         Download mission waypoints from Pixhawk
         Returns: List of (lat, lon, alt) tuples
         """
         logger.info("》 Requesting mission waypoints...")
-        loop = asyncio.get_event_loop()
         
         try:
             # Request mission count
@@ -309,13 +301,13 @@ class PixhawkMAVLink:
             )
             
             # Wait for mission count
-            msg = await loop.run_in_executor(
-                None,
-                self.master.recv_match,
-                ['MISSION_COUNT'],
-                True,
-                5.0
-            )
+            start = time.time()
+            msg = None
+            while time.time() - start < 5.0:
+                msg = self.master.recv_match(type='MISSION_COUNT', blocking=False)
+                if msg:
+                    break
+                await asyncio.sleep(0.1)
             
             if not msg:
                 logger.warning("⚠ No mission count received")
@@ -338,13 +330,13 @@ class PixhawkMAVLink:
                 )
                 
                 # Wait for mission item
-                msg = await loop.run_in_executor(
-                    None,
-                    self.master.recv_match,
-                    ['MISSION_ITEM_INT'],
-                    True,
-                    5.0
-                )
+                start = time.time()
+                msg = None
+                while time.time() - start < 5.0:
+                    msg = self.master.recv_match(type='MISSION_ITEM_INT', blocking=False)
+                    if msg and msg.seq == seq:
+                        break
+                    await asyncio.sleep(0.1)
                 
                 if msg:
                     # Command 16 = NAV_WAYPOINT, skip HOME/TAKEOFF/LAND
