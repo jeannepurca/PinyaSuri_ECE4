@@ -11,14 +11,10 @@ from pathlib import Path
 import config
 from pixhawk_mavlink import PixhawkMAVLink as PixhawkInterface
 from flight_metrics import FlightMetrics
-from image_capture import ImageCapture
-from waypoint_detector import WaypointDetector
-from mission_reader_mavlink import read_mission_waypoints_mavlink
+from old_files.image_capture import ImageCapture
 
-# Ensure directories exist before logging
 config.ensure_directories()
 
-# Configure Logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(levelname)s:%(name)s:%(message)s',
@@ -37,7 +33,6 @@ class TestFlight:
         self.pixhawk: Optional[PixhawkInterface] = None
         self.camera: Optional[ImageCapture] = None
         self.metrics_logger: Optional[FlightMetrics] = None
-        self.waypoint_detector: Optional[WaypointDetector] = None
         self.shutdown_event = asyncio.Event()
         self._capture_lock = asyncio.Lock()
 
@@ -50,7 +45,7 @@ class TestFlight:
         for attempt in range(1, max_retries + 1):
             try:
                 logger.info(f"》》》 Initializing Pixhawk MAVLink (attempt {attempt}/{max_retries})...")
-                self.pixhawk = PixhawkInterface(connection_string=config.MAVLINK_CONNECTION)
+                self.pixhawk = PixhawkInterface(connection_string=config.PIXHAWK_ADDRESS)
                 await self.pixhawk.connect(timeout=config.CONNECTION_TIMEOUT)
                 logger.info("✓ Pixhawk MAVLink connected successfully.")
                 break
@@ -60,32 +55,6 @@ class TestFlight:
                     logger.error("⚠ Maximum retry attempts reached for Pixhawk.")
                     return False
                 await asyncio.sleep(2)
-
-        # Download mission waypoints using direct MAVLink
-        try:
-            logger.info("》》》 Downloading mission waypoints via MAVLink...")
-            
-            waypoints = await read_mission_waypoints_mavlink(self.pixhawk)
-            
-            if len(waypoints) == 0:
-                logger.warning("⚠ No waypoints found in mission!")
-                logger.warning("⚠ System will run but won't capture images")
-                self.waypoint_detector = None
-            else:
-                logger.info(f"✓ Loaded {len(waypoints)} waypoints for detection")
-                self.waypoint_detector = WaypointDetector(waypoints, radius_meters=config.WAYPOINT_DETECTION_RADIUS)
-                
-                # Log all waypoints for debugging
-                logger.info("=" * 60)
-                logger.info("LOADED WAYPOINTS:")
-                for idx, (lat, lon, alt) in enumerate(waypoints):
-                    logger.info(f"  WP{idx+1}: ({lat:.7f}, {lon:.7f}, {alt:.1f}m)")
-                logger.info("=" * 60)
-                
-        except Exception as e:
-            logger.warning(f"⚠ Could not download mission: {e}")
-            logger.warning("⚠ Distance-based detection disabled")
-            self.waypoint_detector = None
 
         # Initialize Camera
         try:
@@ -128,15 +97,16 @@ class TestFlight:
     async def run_mission(self):
         """Main mission loop with continuous cycle support"""
         
-        # Create Queues for Telemetry - Main Loop
+        # Queues for Telemetry - Main Loop
         main_pos_queue = asyncio.Queue()
         main_imu_queue = asyncio.Queue()
         main_battery_queue = asyncio.Queue()
         main_armed_queue = asyncio.Queue()
         main_mode_queue = asyncio.Queue()
         main_in_air_queue = asyncio.Queue()
-        
-        # Create SEPARATE Queues for Metrics Logger
+        main_wp_queue = asyncio.Queue()
+
+        # Queues for Metrics Logger
         metrics_pos_queue = asyncio.Queue()
         metrics_imu_queue = asyncio.Queue()
         metrics_battery_queue = asyncio.Queue()
@@ -149,8 +119,9 @@ class TestFlight:
         armed_task = asyncio.create_task(self.pixhawk.subscribe_armed(main_armed_queue))
         mode_task = asyncio.create_task(self.pixhawk.subscribe_flight_mode(main_mode_queue))
         in_air_task = asyncio.create_task(self.pixhawk.subscribe_in_air(main_in_air_queue))
-        
-        # Start SEPARATE Telemetry Subscriptions - Metrics Logger
+        wp_task = asyncio.create_task(self.pixhawk.subscribe_mission_current(main_wp_queue))
+
+        # Start Telemetry Subscriptions - Metrics Logger
         metrics_pos_task = asyncio.create_task(self.pixhawk.subscribe_positions(metrics_pos_queue))
         metrics_imu_task = asyncio.create_task(self.pixhawk.subscribe_imu_accel(metrics_imu_queue))
         metrics_batt_task = asyncio.create_task(self.pixhawk.subscribe_battery(metrics_battery_queue))
@@ -175,6 +146,8 @@ class TestFlight:
         last_check = 0
         flight_number = 0
         last_distance_log = 0
+        current_wp = None
+        last_captured_wp = None
 
         # DEBUG: Counters
         position_update_count = 0
@@ -232,6 +205,15 @@ class TestFlight:
                 except asyncio.QueueEmpty:
                     pass
             
+                # Process Mission Current (Waypoint Execution)
+                try:
+                    while True:
+                        seq = main_wp_queue.get_nowait()
+                        current_wp = seq + 1  # human-readable
+                        logger.info(f"📍 Pixhawk executing WP{current_wp}")
+                except asyncio.QueueEmpty:
+                    pass
+
                 # Process Position Updates
                 try:
                     while True:
@@ -300,30 +282,22 @@ class TestFlight:
                     logger.info(f"[STATUS] {' | '.join(status)}")
 
                 # Check waypoints if we have position data
-                if mission_started and latest_pos and self.waypoint_detector:
-                    if current_time - last_check >= check_interval:
-                        last_check = current_time
-                        waypoint_check_count += 1
-                        
-                        # Check if near any waypoint
-                        wp_idx, distance = self.waypoint_detector.check_position(
-                            latest_pos["lat"],
-                            latest_pos["lon"]
-                        )
-                        
-                        if wp_idx is not None:
-                            logger.info("=" * 60)
-                            logger.info(f"📍 WAYPOINT {wp_idx + 1} DETECTED!")
-                            logger.info(f"   Distance: {distance:.2f}m from waypoint")
-                            logger.info(f"   In Air Status: {is_in_air}")
-                            logger.info("=" * 60)
-                            
-                            await self._capture_at_waypoint(
-                                wp_idx + 1,
-                                len(self.waypoint_detector.waypoints),
-                                latest_pos,
-                                flight_number
-                            )
+                if (
+                    mission_started
+                    and is_armed
+                    and is_in_air
+                    and current_flight_mode == "AUTO"
+                    and current_wp is not None
+                    and current_wp != last_captured_wp
+                ):
+                    last_captured_wp = current_wp
+
+                    await self._capture_at_waypoint(
+                        current_wp,
+                        mission_total=0,  # no longer required
+                        position=latest_pos,
+                        flight_number=flight_number
+                    )
                 
                 await asyncio.sleep(config.MAIN_LOOP_INTERVAL)
         
@@ -334,9 +308,8 @@ class TestFlight:
             # Cleanup ALL Tasks (main + metrics)
             logger.info("》》》 Stopping mission tasks...")
             all_tasks = [
-                pos_task, imu_task, batt_task, armed_task, mode_task, in_air_task,
-                metrics_pos_task, metrics_imu_task, metrics_batt_task, metrics_armed_task,
-                metrics_task
+                pos_task, imu_task, batt_task, armed_task, mode_task, in_air_task, 
+                wp_task, metrics_pos_task, metrics_imu_task, metrics_batt_task, metrics_armed_task, metrics_task
             ]
             for task in all_tasks:
                 task.cancel()

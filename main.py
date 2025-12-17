@@ -1,398 +1,193 @@
 #!/usr/bin/env python3
+# main.py - Using async/await
 
 import asyncio
-import logging
+import time
 import csv
-import sys
-from datetime import datetime
-from typing import Optional
-from pathlib import Path
+import logging
+import signal
 
 import config
-from pixhawk_interface import PixhawkInterface
-from flight_metrics import FlightMetrics
-from image_capture import ImageCapture
-from ai_classifier import Classifier
-from waypoint_detector import WaypointDetector
-from mission_reader_mavsdk import read_mission_waypoints_mavsdk
+from pixhawk import Pixhawk
+from camera import Camera
+from metrics import FlightMetrics
 
-# Ensure directories exist before logging
-config.ensure_directories()
+running = True
 
-# Configure Logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(levelname)s:%(name)s:%(message)s',
-    handlers=[
-        logging.FileHandler(config.LOG_DIR / "flight.log"),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger("PinyaSuri")
+def signal_handler(sig, frame):
+    global running
+    print("\n⚠ Shutdown requested...")
+    running = False
 
+def setup_logging():
+    config.ensure_directories()
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(levelname)s:%(name)s:%(message)s',
+        handlers=[
+            logging.FileHandler(config.LOG_DIR / "test_flight.log"),
+            logging.StreamHandler()
+        ]
+    )
+    return logging.getLogger("TestFlight")
 
-class PinyaSuri:
-    """Main system coordinator for PinyaSuri with continuous cycle support"""
+def initialize_csv():
+    with open(config.LOG_DIR / "image_log.csv", "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["timestamp", "flight", "waypoint", "lat", "lon", "rel_alt", "image"])
 
-    def __init__(self):
-        self.pixhawk: Optional[PixhawkInterface] = None
-        self.camera: Optional[ImageCapture] = None
-        self.classifier: Optional[Classifier] = None
-        self.metrics_logger: Optional[FlightMetrics] = None
-        self.waypoint_detector: Optional[WaypointDetector] = None
-        self.shutdown_event = asyncio.Event()
-        self._capture_lock = asyncio.Lock()
+async def log_image_capture_async(flight_number, waypoint, position, image_path):
+    """Non-blocking CSV write"""
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, log_image_capture_sync, 
+                               flight_number, waypoint, position, image_path)
 
-    async def initialize(self, max_retries: int = 3) -> bool:
-        """Initialize system components (Pixhawk, Camera, AI, CSV, Metrics)""" 
+def log_image_capture_sync(flight_number, waypoint, position, image_path):
+    """Synchronous CSV write for executor"""
+    with open(config.LOG_DIR / "image_log.csv", "a", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow([
+            time.time(), flight_number, waypoint,
+            position["lat"], position["lon"], position["rel_alt"],
+            image_path
+        ])
 
-        config.ensure_directories()
+async def capture_image_async(camera, waypoint, flight_number):
+    """Non-blocking image capture"""
+    loop = asyncio.get_event_loop()
+    image_path = await loop.run_in_executor(
+        None, 
+        camera.capture,
+        waypoint,
+        flight_number,
+        "pinyasuri"
+    )
+    return image_path
+
+async def telemetry_updater(pixhawk, metrics):
+    """Continuously update telemetry at high rate"""
+    while running:
+        pixhawk.update()
         
-        # Initialize Pixhawk
-        for attempt in range(1, max_retries + 1):
-            try:
-                logger.info(f"》》》 Initializing Pixhawk (attempt {attempt}/{max_retries})...")
-                self.pixhawk = PixhawkInterface(system_address=config.PIXHAWK_ADDRESS)
-                await self.pixhawk.connect(timeout=config.CONNECTION_TIMEOUT)
-                logger.info("✓ Pixhawk connected successfully.")
-                break
-            except Exception as e:
-                logger.error(f"✗ Pixhawk connection failed: {e}")
-                if attempt == max_retries:
-                    logger.error("⚠ Maximum retry attempts reached for Pixhawk.")
-                    return False
-                await asyncio.sleep(2)
+        if pixhawk.armed and pixhawk.position:
+            telemetry = {
+                "rel_alt": pixhawk.position["rel_alt"],
+                "lat": pixhawk.position["lat"],
+                "lon": pixhawk.position["lon"],
+                "imu_accel": pixhawk.imu_accel,
+                "battery_remaining": pixhawk.battery_remaining
+            }
+            metrics.update(telemetry)
+        
+        await asyncio.sleep(0.05)  # High-frequency telemetry updates
 
-        # Download mission waypoints using MAVSDK
-        try:
-            logger.info("》》》 Downloading mission waypoints via MAVSDK...")
+async def waypoint_monitor(pixhawk, camera, metrics, state):
+    """Monitor and capture images at waypoints"""
+    while running:
+        if (
+            pixhawk.armed
+            and pixhawk.mode == "AUTO"
+            and pixhawk.last_wp
+            and pixhawk.last_wp not in state['captured_wp']
+            and pixhawk.position
+        ):
+            wp = pixhawk.last_wp
             
-            waypoints = await read_mission_waypoints_mavsdk(self.pixhawk)
+            # Wait before capture (non-blocking)
+            await asyncio.sleep(1.5)
             
-            if len(waypoints) == 0:
-                logger.warning("⚠ No waypoints found in mission!")
-                logger.warning("⚠ System will run but won't capture images")
-                self.waypoint_detector = None
-            else:
-                logger.info(f"✓ Loaded {len(waypoints)} waypoints for detection")
-                self.waypoint_detector = WaypointDetector(waypoints, radius_meters=config.WAYPOINT_DETECTION_RADIUS)
-                
-        except Exception as e:
-            logger.warning(f"⚠ Could not download mission: {e}")
-            logger.warning("⚠ Distance-based detection disabled")
-            self.waypoint_detector = None
-
-        # Initialize Camera
-        try:
-            logger.info("》》》 Initializing Camera...")
-            self.camera = ImageCapture(
-                output_dir=str(config.IMAGE_DIR)
+            # Capture image (runs in thread pool)
+            image_path = await capture_image_async(camera, wp, state['flight_number'])
+            
+            # Log to CSV (runs in thread pool)
+            await log_image_capture_async(
+                state['flight_number'], wp, pixhawk.position, image_path
             )
-            logger.info("✓ Camera initialized successfully.")
-        except Exception as e:
-            logger.error(f"✗ Camera initialization failed: {e}")
-            return False
+            
+            print(f"📸 Captured WP{wp}")
+            state['captured_wp'].add(wp)
+            metrics.increment_waypoint()
         
-        # Initialize AI Classifier
-        try:
-            logger.info("》》》 Loading AI Model...")
-            self.classifier = Classifier(
-                model_path=str(config.MODEL_PATH),
-                input_size=config.MODEL_INPUT_SIZE
+        await asyncio.sleep(0.1)
+
+async def arm_monitor(pixhawk, metrics, state):
+    """Monitor arm/disarm state changes"""
+    was_armed = False
+    
+    while running:
+        if pixhawk.armed and not was_armed:
+            # Just armed
+            metrics.start_flight(True, pixhawk.battery_remaining)
+            was_armed = True
+            print(f"🛫 Flight {state['flight_number']} armed")
+            
+        elif not pixhawk.armed and was_armed:
+            # Just disarmed
+            metrics.end_flight(True)
+            was_armed = False
+            state['captured_wp'].clear()
+            state['flight_number'] += 1
+            print(f"🛬 Flight ended")
+        
+        await asyncio.sleep(0.2)
+
+async def status_reporter(pixhawk, metrics):
+    """Periodically report system status"""
+    while running:
+        await asyncio.sleep(10)  # Report every 10 seconds
+        
+        if pixhawk.armed:
+            status = (
+                f"📊 Status: Mode={pixhawk.mode}, "
+                f"Alt={pixhawk.position['rel_alt']:.1f}m, "
+                f"WP={pixhawk.last_wp}, "
+                f"Battery={pixhawk.battery_remaining}"
             )
-            logger.info("✓ AI Model loaded successfully.")
-        except Exception as e:
-            logger.error(f"✗ AI Model loading failed: {e}")
-            return False
+            print(status)
 
-        # Initialize CSV for Classification Results
-        self._initialize_classification_csv()
-
-        # Initialize Flight Metrics Logger
-        self.metrics_logger = FlightMetrics(
-            self.pixhawk,
-            output_csv=str(config.FLIGHT_METRICS_CSV)
-        )
-
-        return True
-
-    def _initialize_classification_csv(self):
-        """Create CSV for AI outputs"""
-
-        if not config.CLASSIFICATION_CSV.exists():
-            header = [
-                "timestamp_utc", "image_path", "lat", "lon", "abs_alt_m", "rel_alt_m",
-                "waypoint_number", "total_waypoints", "pred_idx", "pred_label",
-                "confidence", "flight_number"  # ADDED: Track which flight
-            ]
-            
-            with open(config.CLASSIFICATION_CSV, "w", newline="") as f:
-                writer = csv.writer(f)
-                writer.writerow(header)
-            logger.info(f"》 Created classification log: {config.CLASSIFICATION_CSV}")
+async def main_async():
+    """Main async entry point"""
+    # Setup
+    logger = setup_logging()
+    signal.signal(signal.SIGINT, signal_handler)
     
-    async def run_mission(self):
-        """Main mission loop with continuous cycle support"""
-        
-        # Create Queues for Telemetry
-        pos_queue = asyncio.Queue()
-        imu_queue = asyncio.Queue()
-        battery_queue = asyncio.Queue()
-        armed_queue = asyncio.Queue()
-        mode_queue = asyncio.Queue()
-        in_air_queue = asyncio.Queue()
-        
-        # Start Telemetry Subscriptions
-        pos_task = asyncio.create_task(self.pixhawk.subscribe_positions(pos_queue))
-        imu_task = asyncio.create_task(self.pixhawk.subscribe_imu_accel(imu_queue))
-        batt_task = asyncio.create_task(self.pixhawk.subscribe_battery(battery_queue))
-        armed_task = asyncio.create_task(self.pixhawk.subscribe_armed(armed_queue))
-        mode_task = asyncio.create_task(self.pixhawk.subscribe_flight_mode(mode_queue))
-        in_air_task = asyncio.create_task(self.pixhawk.subscribe_in_air(in_air_queue))
-
-        # Pass queues to metrics logger (FIXED)
-        self.metrics_logger.pos_queue = pos_queue
-        self.metrics_logger.imu_queue = imu_queue
-        self.metrics_logger.battery_queue = battery_queue
-        self.metrics_logger.armed_queue = armed_queue
-
-        metrics_task = asyncio.create_task(self.metrics_logger.run())
-
-        # Mission State Variables
-        latest_pos = None
-        is_armed = False
-        is_in_air = False
-        mission_started = False
-        was_armed_before = False
-        current_flight_mode = "UNKNOWN"
-        check_interval = 0.5
-        last_check = 0
-        flight_number = 0  # Track flight cycles
-
-        # DEBUG: Counters
-        position_update_count = 0
-        mode_update_count = 0
-        
-        logger.info("=" * 60)
-        logger.info("🍍 PINYASURI SYSTEM READY! 🚁")
-        logger.info("System will run continuously. Press Ctrl+C to stop.")
-        logger.info("=" * 60)
-
-        try:
-            while not self.shutdown_event.is_set():
-
-                # Process Armed Status
-                try:
-                    while True:
-                        armed_data = armed_queue.get_nowait()
-                        new_armed = armed_data["armed"]
-                        
-                        # Detect ARM transition (start new flight)
-                        if new_armed and not is_armed:
-                            flight_number += 1
-                            mission_started = True
-                            was_armed_before = True
-                            
-                            # Reset waypoint detector for new flight
-                            if self.waypoint_detector:
-                                self.waypoint_detector.reset()
-                            
-                            logger.info("=" * 60)
-                            logger.info(f"🛫 FLIGHT #{flight_number} - DRONE ARMED")
-                            logger.info("   Mission monitoring started")
-                            logger.info("=" * 60)
-
-                        # Detect DISARM transition (end current flight)
-                        if not new_armed and is_armed and was_armed_before:
-                            logger.info("=" * 60)
-                            logger.info(f"🛬 FLIGHT #{flight_number} - DRONE DISARMED")
-                            logger.info(f"   Total position updates: {position_update_count}")
-                            if self.waypoint_detector:
-                                captured = sorted([x+1 for x in self.waypoint_detector.captured])
-                                logger.info(f"   Captured waypoints: {captured}")
-                            logger.info("   Ready for next flight...")
-                            logger.info("=" * 60)
-                            
-                            # Reset for next flight
-                            mission_started = False
-                            position_update_count = 0
-                        
-                        is_armed = new_armed
-                        
-                except asyncio.QueueEmpty:
-                    pass
-            
-                # Process Position Updates
-                try:
-                    while True:
-                        latest_pos = pos_queue.get_nowait()
-                        position_update_count += 1
-                except asyncio.QueueEmpty:
-                    pass
-            
-                # Process Flight Mode Updates
-                try:
-                    while True:
-                        mode = mode_queue.get_nowait()
-                        mode_update_count += 1
-                        if mode != current_flight_mode:
-                            current_flight_mode = mode
-                            logger.info(f"》 Flight Mode: {mode}")
-                except asyncio.QueueEmpty:
-                    pass
-                
-                # Process In-Air Status
-                try:
-                    while True:
-                        new_in_air = in_air_queue.get_nowait()
-                        
-                        # Log transitions
-                        if new_in_air and not is_in_air:
-                            logger.info("》 Drone is now IN AIR - waypoint detection active")
-                        elif not new_in_air and is_in_air:
-                            logger.info("》 Drone is on GROUND - waypoint detection paused")
-                        
-                        is_in_air = new_in_air
-                except asyncio.QueueEmpty:
-                    pass
-
-                # Only check waypoints if armed, in air, and we have position data
-                if mission_started and is_in_air and latest_pos and self.waypoint_detector:
-                    current_time = asyncio.get_event_loop().time()
-                    
-                    if current_time - last_check >= check_interval:
-                        last_check = current_time
-                        
-                        # Check if near any waypoint
-                        wp_idx, distance = self.waypoint_detector.check_position(
-                            latest_pos["lat"],
-                            latest_pos["lon"]
-                        )
-                        
-                        if wp_idx is not None:
-                            logger.info("=" * 60)
-                            logger.info(f"📍 WAYPOINT {wp_idx + 1} DETECTED!")
-                            logger.info(f"   Distance: {distance:.2f}m from waypoint")
-                            logger.info("=" * 60)
-                            
-                            await self._process_waypoint(
-                                wp_idx + 1,
-                                len(self.waypoint_detector.waypoints),
-                                latest_pos,
-                                flight_number
-                            )
-                
-                await asyncio.sleep(config.MAIN_LOOP_INTERVAL)
-        
-        except Exception as e:
-            logger.error(f"✗ Error in mission loop: {e}", exc_info=True)
-        
-        finally:
-            # Cleanup Tasks
-            logger.info("》》》 Stopping mission tasks...")
-            for task in [pos_task, imu_task, batt_task, armed_task, mode_task, in_air_task, metrics_task]:
-                task.cancel()
-            await asyncio.gather(
-                pos_task, imu_task, batt_task, armed_task, mode_task, in_air_task, metrics_task, 
-                return_exceptions=True
-            )
-
-    async def _process_waypoint(self, waypoint_idx: int, mission_total: int, 
-                               position: Optional[dict], flight_number: int):
-        """Capture image and run classification at a waypoint"""
-
-        logger.info("=" * 60)
-        logger.info(f"📸 WAYPOINT {waypoint_idx} REACHED - Processing...")
-        logger.info("=" * 60)  
-
-        try:
-            # Capture Image
-            image_path = self.camera.capture(prefix=f"flight{flight_number}_wp{waypoint_idx}")
-            logger.info(f"✓ Image captured: {image_path}")
-            
-            # Run AI Classification
-            result = self.classifier.predict(image_path)
-            pred_label = config.get_class_name(result["index"])
-            logger.info(f"》 Classification: {pred_label} (confidence: {result['confidence']:.2%})")
-            
-            # Log to CSV
-            timestamp = datetime.utcnow().isoformat()
-            lat = position["lat"] if position else ""
-            lon = position["lon"] if position else ""
-            abs_alt = position["abs_alt"] if position else ""
-            rel_alt = position["rel_alt"] if position else ""
-            
-            with open(config.CLASSIFICATION_CSV, "a", newline="") as f:
-                writer = csv.writer(f)
-                writer.writerow([
-                    timestamp, image_path, lat, lon, abs_alt, rel_alt,
-                    waypoint_idx, mission_total, result["index"], pred_label,
-                    result["confidence"], flight_number
-                ])
-            
-            # Display Position Info
-            if position:
-                logger.info(f"  Location: {lat:.6f}°, {lon:.6f}°")
-                logger.info(f"  Altitude: {rel_alt:.1f}m (relative), {abs_alt:.1f}m (absolute)")
-            
-            logger.info(f"✓ Waypoint {waypoint_idx} processed successfully.")
-            
-        except Exception as e:
-            logger.error(f"✗ Error processing waypoint {waypoint_idx}: {e}", exc_info=True)
-
-    async def shutdown(self):
-        """Graceful shutdown of all components"""
-
-        logger.info("=" * 60)
-        logger.info("⚠ INITIATING SHUTDOWN ⚠")
-        logger.info("=" * 60)
-        
-        self.shutdown_event.set()
-        
-        if self.camera:
-            self.camera.close()
-        
-        logger.info("✓ Shutdown complete.")
-
-
-async def main():
-    """Main entry point"""
+    # Initialize components
+    pixhawk = Pixhawk()
+    camera = Camera()
+    metrics = FlightMetrics()
     
-    system = PinyaSuri()
+    pixhawk.wait_for_connection()
+    initialize_csv()
     
-    # Initialize system
-    logger.info("=" * 60)
-    logger.info("🍍 WELCOME TO PINYASURI SYSTEM 🚁")
-    logger.info("=" * 60)
-
-    if not await system.initialize():
-        logger.error("✗ System initialization failed. Exiting.")
-        return 1
+    # Shared state
+    state = {
+        'flight_number': 1,
+        'captured_wp': set()
+    }
     
-    logger.info("=" * 60)
-    logger.info("✓ ALL SYSTEMS INITIALIZED SUCCESSFULLY!")
-    logger.info("System ready for continuous flight cycles.")
-    logger.info("Press Ctrl+C to stop.")
-    logger.info("=" * 60)
+    print("🚁 Mission monitoring started (async mode)")
     
-    # Run Mission
     try:
-        await system.run_mission()
-    except KeyboardInterrupt:
-        logger.info("=" * 60)
-        logger.info("⚠ MANUAL STOP - Interrupted by user! ⚠")
-        logger.info("=" * 60)
+        # Run all tasks concurrently
+        await asyncio.gather(
+            telemetry_updater(pixhawk, metrics),     # High-freq telemetry
+            waypoint_monitor(pixhawk, camera, metrics, state),  # Image capture
+            arm_monitor(pixhawk, metrics, state),    # Arm/disarm tracking
+            status_reporter(pixhawk, metrics)        # Status updates
+        )
     except Exception as e:
-        logger.error(f"✗ Unexpected error: {e}", exc_info=True)
-        return 1
+        logger.error(f"Fatal error: {e}", exc_info=True)
     finally:
-        await system.shutdown()
-    
-    logger.info("=" * 60)
-    logger.info("⚠ PINYASURI SYSTEM STOPPED ⚠")
-    logger.info("=" * 60)
-    return 0
+        print("\n🔧 Cleaning up...")
+        try:
+            camera.close()
+        except Exception as e:
+            print(f"⚠ Error closing camera: {e}")
+        print("✓ Cleanup complete")
 
+def main():
+    """Entry point - starts the async event loop"""
+    asyncio.run(main_async())
 
 if __name__ == "__main__":
-    sys.exit(asyncio.run(main()))
+    main()

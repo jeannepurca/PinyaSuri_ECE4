@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# config.py
 
 from pathlib import Path
 
@@ -8,22 +9,18 @@ LOG_DIR = BASE_DIR / "logs"
 IMAGE_DIR = BASE_DIR / "images"
 TEST_IMAGE_DIR = IMAGE_DIR / "test"
 
-# CSV Output Files
-CLASSIFICATION_CSV = LOG_DIR / "ai_classifications.csv"
-FLIGHT_METRICS_CSV = LOG_DIR / "drone_flight_metrics.csv"
-
-# MAVLink Configuration (NEW)
-# MAVProxy will forward telemetry to this UDP port
-MAVLINK_CONNECTION = "udp:127.0.0.1:14551"
-CONNECTION_TIMEOUT = 30
-
-# Legacy Pixhawk Config (for reference only)
+# Pixhawk Connection
 PIXHAWK_ADDRESS = "serial:///dev/ttyAMA0:57600"
 
-# Waypoint Detection Configuration
-WAYPOINT_DETECTION_RADIUS = 5.0  # meters (increased for GPS tolerance)
+# Flight Capture Settings
+MIN_ALTITUDE_FOR_CAPTURE = 2.0
 
-# Model Configuration
+# Timing Configuration
+MAIN_LOOP_INTERVAL = 0.1  # seconds
+METRICS_LOG_INTERVAL = 0.5  # seconds
+METRICS_WINDOW_SIZE = 10
+
+# AI Model Configuration
 MODEL_PATH = BASE_DIR / "models" / "pinyasuri_classifier.tflite"
 MODEL_INPUT_SIZE = (224, 224)
 
@@ -37,10 +34,10 @@ CLASS_NAMES = {
     5: "Multiple Crown Disorder"
 }
 
-# Timing Configuration
-MAIN_LOOP_INTERVAL = 0.1  # seconds
-METRICS_LOG_INTERVAL = 0.5  # seconds
-METRICS_WINDOW_SIZE = 10
+# CSV Output Files
+FLIGHT_METRICS_CSV = LOG_DIR / "drone_flight_metrics.csv"
+IMAGE_LOG_CSV = LOG_DIR / "image_log.csv"
+CLASSIFICATION_CSV = LOG_DIR / "ai_classifications.csv"
 
 def get_class_name(index: int) -> str:
     """Get class name from index"""
