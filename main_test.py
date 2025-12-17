@@ -4,7 +4,6 @@
 import time
 import csv
 import logging
-import signal
 import sys
 
 import config
@@ -14,12 +13,6 @@ from metrics import FlightMetrics
 
 # Global flag for graceful shutdown
 running = True
-
-def signal_handler(sig, frame):
-    """Handle Ctrl+C gracefully"""
-    global running
-    print("\n⚠ Shutdown requested...")
-    running = False
 
 def setup_logging():
     """Configure logging system"""
@@ -184,9 +177,10 @@ def cleanup(camera, metrics, was_armed):
     print("✓ Cleanup complete")
 
 def main():
+    global running
+    
     # Setup
     logger = setup_logging()
-    signal.signal(signal.SIGINT, signal_handler)
     
     # Initialize components
     pixhawk = Pixhawk()
@@ -202,8 +196,11 @@ def main():
         was_armed = main_loop(pixhawk, camera, metrics, logger)
         
     except KeyboardInterrupt:
-        print("\n>>> Interrupted by user")
-        was_armed = False
+        print("\n⚠ Shutdown requested...")
+        running = False
+        # Give the main loop a moment to exit gracefully
+        time.sleep(0.5)
+        was_armed = pixhawk.armed if pixhawk else False
     except Exception as e:
         logger.error(f"⚠ Fatal error: {e} ⚠", exc_info=True)
         was_armed = False
