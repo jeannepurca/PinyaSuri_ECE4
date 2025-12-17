@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# config.py
 
 from pathlib import Path
 
@@ -12,16 +13,14 @@ TEST_IMAGE_DIR = IMAGE_DIR / "test"
 CLASSIFICATION_CSV = LOG_DIR / "ai_classifications.csv"
 FLIGHT_METRICS_CSV = LOG_DIR / "drone_flight_metrics.csv"
 
-# MAVLink Configuration (NEW)
-# MAVProxy will forward telemetry to this UDP port
-MAVLINK_CONNECTION = "udp:127.0.0.1:14551"
-CONNECTION_TIMEOUT = 30
-
-# Legacy Pixhawk Config (for reference only)
+# Legacy Pixhawk Config
 PIXHAWK_ADDRESS = "serial:///dev/ttyAMA0:57600"
 
 # Waypoint Detection Configuration
-WAYPOINT_DETECTION_RADIUS = 5.0  # meters (increased for GPS tolerance)
+WAYPOINT_DETECTION_RADIUS = 5.0  # meters
+
+# Failsafe Configuration
+MIN_ALTITUDE_FOR_CAPTURE = 2.0
 
 # Model Configuration
 MODEL_PATH = BASE_DIR / "models" / "pinyasuri_classifier.tflite"

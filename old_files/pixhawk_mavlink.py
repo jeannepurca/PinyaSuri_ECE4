@@ -2,25 +2,14 @@
 
 import asyncio
 import logging
-import time
 from pymavlink import mavutil
-from typing import Optional, Tuple
 
 logger = logging.getLogger("PixhawkMAVLink")
 
-
-class PixhawkMAVLink:
-    """Direct MAVLink interface for Pixhawk telemetry via UDP"""
-    
-    def __init__(self, connection_string: str = "udpin:127.0.0.1:14551"):
-        """
-        Args:
-            connection_string: MAVLink connection (default: UDP from MAVProxy)
-        """
+class PixhawkMAVLink:    
+    def __init__(self, connection_string: str):
         self.connection_string = connection_string
         self.master = None
-        self._connected = False
-        
         # Latest telemetry data
         self.latest_position = None
         self.latest_attitude = None
@@ -28,7 +17,6 @@ class PixhawkMAVLink:
         self.latest_flight_mode = None
         self.is_armed = False
         self.is_in_air = False
-        
         # Flight timing
         self.takeoff_time = None
     
@@ -73,27 +61,6 @@ class PixhawkMAVLink:
         except Exception as e:
             logger.error(f"✗ Failed to connect: {e}")
             raise
-    
-    async def _request_data_streams(self):
-        """Request telemetry streams at specified rates"""
-        
-        # Request 5 Hz for position, attitude, and system status
-        for stream_id in [
-            mavutil.mavlink.MAV_DATA_STREAM_POSITION,
-            mavutil.mavlink.MAV_DATA_STREAM_EXTRA1,
-            mavutil.mavlink.MAV_DATA_STREAM_EXTENDED_STATUS
-        ]:
-            self.master.mav.request_data_stream_send(
-                self.master.target_system,
-                self.master.target_component,
-                stream_id,
-                5,  # 5 Hz
-                1   # Start streaming
-            )
-            # Small delay between requests
-            await asyncio.sleep(0.01)
-        
-        logger.info("》 Requested telemetry streams at 5 Hz")
     
     async def subscribe_positions(self, pos_queue: asyncio.Queue):
         """Subscribe to GPS position updates (GLOBAL_POSITION_INT)"""
@@ -286,81 +253,29 @@ class PixhawkMAVLink:
         except Exception as e:
             logger.error(f"In-air subscription error: {e}", exc_info=True)
     
-    async def download_mission(self) -> list:
-        """
-        Download mission waypoints from Pixhawk
-        Returns: List of (lat, lon, alt) tuples
-        """
-        logger.info("》 Requesting mission waypoints...")
-        
+    async def subscribe_mission_current(self, wp_queue: asyncio.Queue):
+        """Subscribe to Pixhawk mission execution (MISSION_CURRENT)"""
+        logger.info("》》》 Starting mission current subscription...")
+
+        last_seq = None
+
         try:
-            # Request mission count
-            self.master.mav.mission_request_list_send(
-                self.master.target_system,
-                self.master.target_component
-            )
-            
-            # Wait for mission count
-            start = time.time()
-            msg = None
-            while time.time() - start < 5.0:
-                msg = self.master.recv_match(type='MISSION_COUNT', blocking=False)
-                if msg:
-                    break
-                await asyncio.sleep(0.1)
-            
-            if not msg:
-                logger.warning("⚠ No mission count received")
-                return []
-            
-            count = msg.count
-            logger.info(f"》 Mission has {count} items")
-            
-            if count == 0:
-                return []
-            
-            waypoints = []
-            
-            # Request each mission item
-            for seq in range(count):
-                self.master.mav.mission_request_int_send(
-                    self.master.target_system,
-                    self.master.target_component,
-                    seq
+            while True:
+                msg = self.master.recv_match(
+                    type="MISSION_CURRENT",
+                    blocking=False
                 )
-                
-                # Wait for mission item
-                start = time.time()
-                msg = None
-                while time.time() - start < 5.0:
-                    msg = self.master.recv_match(type='MISSION_ITEM_INT', blocking=False)
-                    if msg and msg.seq == seq:
-                        break
-                    await asyncio.sleep(0.1)
-                
+
                 if msg:
-                    # Command 16 = NAV_WAYPOINT, skip HOME/TAKEOFF/LAND
-                    if msg.command == 16 and seq > 0:
-                        lat = msg.x / 1e7  # Convert from int32
-                        lon = msg.y / 1e7
-                        alt = msg.z
-                        
-                        waypoints.append((lat, lon, alt))
-                        logger.info(f"  WP{len(waypoints)}: ({lat:.7f}, {lon:.7f}, {alt:.1f}m)")
-            
-            # Send ACK
-            self.master.mav.mission_ack_send(
-                self.master.target_system,
-                self.master.target_component,
-                mavutil.mavlink.MAV_MISSION_ACCEPTED
-            )
-            
-            logger.info(f"✓ Downloaded {len(waypoints)} waypoints")
-            return waypoints
-            
-        except Exception as e:
-            logger.error(f"✗ Mission download failed: {e}", exc_info=True)
-            return []
+                    if msg.seq != last_seq:
+                        last_seq = msg.seq
+                        await wp_queue.put(msg.seq)
+
+                await asyncio.sleep(0.05)
+
+        except asyncio.CancelledError:
+            logger.info("⚠ Mission current subscription stopped.")
+            raise
     
     def is_connected(self) -> bool:
         """Check if connection is active"""

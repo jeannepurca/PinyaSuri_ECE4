@@ -7,15 +7,6 @@ logger = logging.getLogger("MissionReader")
 
 
 async def read_mission_waypoints_mavlink(pixhawk_interface):
-    """
-    Read waypoints using direct MAVLink protocol.
-    
-    Args:
-        pixhawk_interface: Connected PixhawkMAVLink instance
-    
-    Returns:
-        List of waypoint tuples [(lat, lon, alt), ...]
-    """
     try:
         logger.info("》 Requesting mission waypoints via MAVLink...")
         
