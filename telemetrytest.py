@@ -7,7 +7,6 @@ Focus: Tests MISSION_CURRENT waypoint detection logic
 """
 
 import time
-import signal
 import sys
 import logging
 from datetime import datetime
@@ -17,12 +16,6 @@ from pixhawk import Pixhawk
 
 # Global flag for graceful shutdown
 running = True
-
-def signal_handler(sig, frame):
-    """Handle Ctrl+C gracefully"""
-    global running
-    print("\n⚠ Shutdown requested...")
-    running = False
 
 def setup_logging():
     """Configure logging system"""
@@ -337,9 +330,10 @@ def print_summary(logger):
     print("="*70 + "\n")
 
 def main():
+    global running
+    
     # Setup
     logger = setup_logging()
-    signal.signal(signal.SIGINT, signal_handler)
     
     print_header()
     
@@ -347,13 +341,18 @@ def main():
     print(">>> Initializing Pixhawk connection...")
     pixhawk = Pixhawk()
     
-    pixhawk.wait_for_connection()
-    print("✓ Connected to Pixhawk")
-    print("✓ Monitoring for MISSION_CURRENT messages...\n")
-    
-    # Run monitoring loop
     try:
+        pixhawk.wait_for_connection()
+        print("✓ Connected to Pixhawk")
+        print("✓ Monitoring for MISSION_CURRENT messages...\n")
+        
+        # Run monitoring loop
         main_loop(pixhawk, logger)
+        
+    except KeyboardInterrupt:
+        print("\n⚠ Shutdown requested...")
+        running = False
+        time.sleep(0.5)
     except Exception as e:
         logger.error(f"⚠ Fatal error: {e} ⚠", exc_info=True)
         print(f"\n❌ Error occurred: {e}")
