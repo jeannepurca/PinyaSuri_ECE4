@@ -12,7 +12,7 @@ import config
 logger = logging.getLogger("FlightMetrics")
 
 class FlightMetrics:
-    def __init__(self, window_size=100):
+    def __init__(self, window_size=config.METRICS_WINDOW_SIZE):
         # Rolling windows for real-time metrics
         self.altitude_window = deque(maxlen=window_size)
         self.accel_window = deque(maxlen=window_size)
@@ -31,13 +31,12 @@ class FlightMetrics:
         self.battery_end = None
         self.current_flight_number = 1
         # CSV file
-        self.csv_file = config.LOG_DIR / "flight_metrics.csv"
         self._initialize_csv()
 
     # CSV Initialization
     def _initialize_csv(self):
         try:
-            with open(self.csv_file, "x", newline="") as f:
+            with open(config.FLIGHT_METRICS_CSV, "x", newline="") as f:
                 writer = csv.writer(f)
                 writer.writerow([
                     "flight_number",
@@ -201,7 +200,7 @@ class FlightMetrics:
 
     def _write_metrics_to_csv(self, duration, altitude_mean, altitude_std, stability_score,
                               imu_rms, position_jitter, battery_consumed):
-        with open(self.csv_file, "a", newline="") as f:
+        with open(config.FLIGHT_METRICS_CSV, "a", newline="") as f:
             writer = csv.writer(f)
             writer.writerow([
                 self.current_flight_number,

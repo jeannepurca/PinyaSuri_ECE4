@@ -36,13 +36,13 @@ def setup_logging():
 
 def initialize_csv():
     """Create image log CSV with headers"""
-    with open(config.LOG_DIR / "image_log.csv", "w", newline="") as f:
+    with open(config.IMAGE_LOG_CSV, "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(["timestamp", "flight", "waypoint", "lat", "lon", "rel_alt", "image"])
 
 def log_image_capture(flight_number, waypoint, position, image_path):
     """Write image capture data to CSV"""
-    with open(config.LOG_DIR / "image_log.csv", "a", newline="") as f:
+    with open(config.IMAGE_LOG_CSV, "a", newline="") as f:
         writer = csv.writer(f)
         writer.writerow([
             time.time(),
@@ -59,7 +59,7 @@ def handle_waypoint_capture(pixhawk, camera, metrics, waypoint, flight_number, c
     if waypoint in captured_wp:
         return False
     
-    logger.info(f"Preparing to capture WP{waypoint}...")
+    logger.info(f">>> Preparing to capture WP{waypoint}...")
     time.sleep(1.5)
     
     image_path = camera.capture(
@@ -70,7 +70,7 @@ def handle_waypoint_capture(pixhawk, camera, metrics, waypoint, flight_number, c
     
     log_image_capture(flight_number, waypoint, pixhawk.position, image_path)
     
-    print(f"📸 Captured WP{waypoint} at {pixhawk.position['rel_alt']:.1f}m altitude")
+    print(f">>> Captured WP{waypoint} at {pixhawk.position['rel_alt']:.1f}m altitude")
     captured_wp.add(waypoint)
     metrics.increment_waypoint()
     
@@ -108,7 +108,7 @@ def is_drone_in_air(pixhawk):
     if not pixhawk.position:
         return False
     
-    return pixhawk.position["rel_alt"] >= MIN_ALTITUDE_FOR_CAPTURE
+    return pixhawk.position["rel_alt"] >= config.MIN_ALTITUDE_FOR_CAPTURE
 
 def should_capture_image(pixhawk, waypoint, captured_wp, logger):
     """Check if conditions are met for image capture"""
