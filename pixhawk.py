@@ -10,7 +10,7 @@ logger = logging.getLogger("Pixhawk")
 
 class Pixhawk:
     def __init__(self):
-        self.master = mavutil.mavlink_connection(config.PIXHAWK_ADDRESS)
+        self.master = mavutil.mavlink_connection(config.PIXHAWK_ADDRESS, baud=115200)
         self.last_wp = None
         self.position = None
         self.armed = False
