@@ -20,9 +20,9 @@ class Pixhawk:
         self.battery_type = None
 
     def wait_for_connection(self):
-        print(">>> Waiting for heartbeat...")
+        logger.info(">>> Waiting for heartbeat...")
         self.master.wait_heartbeat()
-        print("✓ Pixhawk connected")
+        logger.info("✓ Pixhawk connected successfully!")
 
     def update(self):
         msg = self.master.recv_match(blocking=False)
