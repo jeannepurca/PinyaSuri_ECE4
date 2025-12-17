@@ -155,7 +155,7 @@ def main_loop(pixhawk, camera, metrics, logger):
         
         # Handle arm/disarm state changes
         was_armed, flight_number = handle_arm_state_change(
-            pixhawk, metrics, was_armed, flight_number, captured_wp
+            pixhawk, metrics, was_armed, flight_number, captured_wp, logger
         )
 
         # Check for flight mode changes
