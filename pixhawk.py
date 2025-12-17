@@ -19,10 +19,24 @@ class Pixhawk:
         self.battery_remaining = None
         self.battery_type = None
 
-    def wait_for_connection(self):
-        print(">>> Waiting for heartbeat...")
-        self.master.wait_heartbeat()
-        print("✓ Pixhawk connected")
+    def wait_for_connection(self, timeout=30):
+        """Wait for heartbeat with interruptible timeout"""
+        print(f">>> Waiting for heartbeat (timeout: {timeout}s)...")
+        print(">>> Press Ctrl+C to cancel...")
+        
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            # Non-blocking check for heartbeat
+            msg = self.master.recv_match(type='HEARTBEAT', blocking=True, timeout=0.5)
+            if msg:
+                print("✓ Pixhawk connected")
+                return True
+            
+            # Small sleep to allow signal handling
+            time.sleep(0.1)
+        
+        # Timeout reached
+        raise TimeoutError(f"No heartbeat received after {timeout} seconds")
 
     def update(self):
         msg = self.master.recv_match(blocking=False)
@@ -44,7 +58,7 @@ class Pixhawk:
         elif msg_type == "HEARTBEAT":
             self.armed = bool(
                 msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED
-            )
+            )   
             self.mode = self.master.flightmode
         
         elif msg_type == "RAW_IMU" or msg_type == "SCALED_IMU2":
