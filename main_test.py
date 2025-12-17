@@ -193,15 +193,20 @@ def main():
     camera = Camera()
     metrics = FlightMetrics()
     
-    pixhawk.wait_for_connection()
-    initialize_csv()
-    
-    # Run main loop
-    was_armed = False
+    # Wait for connection
     try:
+        pixhawk.wait_for_connection()
+        initialize_csv()
+        
+        # Run main loop
         was_armed = main_loop(pixhawk, camera, metrics, logger)
+        
+    except KeyboardInterrupt:
+        print("\n>>> Interrupted by user")
+        was_armed = False
     except Exception as e:
         logger.error(f"⚠ Fatal error: {e} ⚠", exc_info=True)
+        was_armed = False
     finally:
         cleanup(camera, metrics, was_armed)
 

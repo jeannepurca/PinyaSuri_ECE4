@@ -19,10 +19,25 @@ class Pixhawk:
         self.battery_remaining = None
         self.battery_type = None
 
-    def wait_for_connection(self):
-        print(">>> Waiting for heartbeat...")
-        self.master.wait_heartbeat()
-        print("✓ Pixhawk connected")
+    def wait_for_connection(self, timeout=30):
+        """Wait for heartbeat with immediate Ctrl+C response"""
+        print(f">>> Waiting for heartbeat (timeout: {timeout}s)...")
+        print(">>> Press Ctrl+C to cancel...")
+        
+        start_time = time.time()
+        try:
+            while time.time() - start_time < timeout:
+                # Short timeout allows Ctrl+C to be processed
+                msg = self.master.recv_match(type='HEARTBEAT', blocking=True, timeout=0.5)
+                if msg:
+                    print("✓ Pixhawk connected")
+                    return True
+        except KeyboardInterrupt:
+            print("\n>>> Connection cancelled by user")
+            raise  # Re-raise to exit the program
+        
+        # Timeout reached
+        raise TimeoutError(f"No heartbeat received after {timeout} seconds")
 
     def update(self):
         msg = self.master.recv_match(blocking=False)
