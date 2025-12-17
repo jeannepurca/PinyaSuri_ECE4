@@ -177,7 +177,7 @@ def main_loop(pixhawk, camera, metrics, logger):
     
     return was_armed
 
-def cleanup(camera, metrics, was_armed,):
+def cleanup(camera, metrics, was_armed, logger):
     """Clean up resources before exit"""
     logger.info("=" * 60)
     logger.info("⚠ INITIATING SHUTDOWN ⚠")
