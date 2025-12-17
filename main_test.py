@@ -84,7 +84,7 @@ def get_telemetry_dict(pixhawk):
         "battery_remaining": pixhawk.battery_remaining
     }
 
-def handle_arm_state_change(pixhawk, metrics, was_armed, flight_number, captured_wp):
+def handle_arm_state_change(pixhawk, metrics, was_armed, flight_number, captured_wp, logger):
     """Detect and handle arm/disarm transitions"""
     if pixhawk.armed and not was_armed:
         # Just armed
