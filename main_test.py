@@ -84,7 +84,7 @@ def get_telemetry_dict(pixhawk):
         "battery_remaining": pixhawk.battery_remaining
     }
 
-def handle_arm_state_change(pixhawk, metrics, was_armed, flight_number, captured_wp):
+def handle_arm_state_change(pixhawk, metrics, was_armed, flight_number, captured_wp, logger):
     """Detect and handle arm/disarm transitions"""
     if pixhawk.armed and not was_armed:
         # Just armed
@@ -115,12 +115,15 @@ def should_capture_image(pixhawk, waypoint, captured_wp, logger):
 
     # Basic checks
     if not pixhawk.armed:
+        logger.debug("Cannot capture: not armed!")
         return False
     
     if not waypoint:
+        logger.debug("Cannot capture: no waypoint!")
         return False
     
     if not pixhawk.position:
+        logger.debug("Cannot capture: no position data yet!")
         return False
     
     if not is_drone_in_air(pixhawk):

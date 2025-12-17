@@ -10,7 +10,7 @@ logger = logging.getLogger("Pixhawk")
 
 class Pixhawk:
     def __init__(self):
-        self.master = mavutil.mavlink_connection(config.PIXHAWK_ADDRESS, baud=115200)
+        self.master = mavutil.mavlink_connection(config.PIXHAWK_ADDRESS, baud=57600)
         self.last_wp = None
         self.position = None
         self.armed = False
@@ -23,6 +23,30 @@ class Pixhawk:
         logger.info(">>> Waiting for heartbeat...")
         self.master.wait_heartbeat()
         logger.info("✓ Pixhawk connected successfully!")
+
+        # Request data streams at higher rate
+        logger.info(">>> Requesting data streams...")
+        self.master.mav.request_data_stream_send(
+            self.master.target_system,
+            self.master.target_component,
+            mavutil.mavlink.MAV_DATA_STREAM_ALL,
+            4,  # 4 Hz
+            1   # Start streaming
+        )
+
+        # Request MISSION_CURRENT specifically
+        self.master.mav.command_long_send(
+            self.master.target_system,
+            self.master.target_component,
+            mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL,
+            0,  # confirmation
+            mavutil.mavlink.MAVLINK_MSG_ID_MISSION_CURRENT,  # Message ID
+            250000,  # Interval in microseconds (250ms = 4 Hz)
+            0, 0, 0, 0, 0
+        )
+
+        time.sleep(0.5)
+        logger.info("✓ Data streams requested")
 
     def update(self):
         msg = self.master.recv_match(blocking=False)
