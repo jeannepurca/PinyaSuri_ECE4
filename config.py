@@ -10,7 +10,7 @@ IMAGE_DIR = BASE_DIR / "images"
 TEST_IMAGE_DIR = IMAGE_DIR / "test"
 
 # Pixhawk Connection
-PIXHAWK_ADDRESS = "serial:/dev/ttyAMA0:57600"
+PIXHAWK_ADDRESS = "/dev/ttyAMA0"
 
 # Flight Capture Settings
 MIN_ALTITUDE_FOR_CAPTURE = 2.0
