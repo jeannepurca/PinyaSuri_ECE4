@@ -12,10 +12,14 @@ from pixhawk import Pixhawk
 from camera import Camera
 from metrics import FlightMetrics
 
+# Global flag for graceful shutdown
+running = True
+
 def signal_handler(sig, frame):
-    """Handle Ctrl+C - immediate exit"""
-    print("\n⚠ Shutdown requested - exiting now...")
-    sys.exit(0)  # Force immediate exit
+    """Handle Ctrl+C gracefully"""
+    global running
+    print("\n⚠ Shutdown requested...")
+    running = False
 
 def setup_logging():
     """Configure logging system"""
