@@ -5,7 +5,6 @@ import time
 import csv
 import logging
 import sys
-import asyncio
 
 import config
 from pixhawk import Pixhawk
@@ -53,9 +52,9 @@ def handle_waypoint_capture(pixhawk, camera, metrics, waypoint, flight_number, c
     if waypoint in captured_wp:
         return False
     
-    print("=" * 60)
-    print(f">>> WAYPOINT {waypoint} REACHED - Capturing image...")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info(f">>> WAYPOINT {waypoint} REACHED - Capturing image...")
+    logger.info("=" * 60)
     time.sleep(1.5)
     
     image_path = camera.capture(
@@ -66,7 +65,7 @@ def handle_waypoint_capture(pixhawk, camera, metrics, waypoint, flight_number, c
     
     log_image_capture(flight_number, waypoint, pixhawk.position, image_path)
     
-    print(f">>> Captured WP{waypoint} at {pixhawk.position['rel_alt']:.1f}m altitude")
+    logger.info(f">>> Captured WP{waypoint} at {pixhawk.position['rel_alt']:.1f}m altitude")
     captured_wp.add(waypoint)
     metrics.increment_waypoint()
     
@@ -85,20 +84,20 @@ def get_telemetry_dict(pixhawk):
         "battery_remaining": pixhawk.battery_remaining
     }
 
-def handle_arm_state_change(pixhawk, metrics, was_armed, flight_number, captured_wp, logger):
+def handle_arm_state_change(pixhawk, metrics, was_armed, flight_number, captured_wp):
     """Detect and handle arm/disarm transitions"""
     if pixhawk.armed and not was_armed:
         # Just armed
-        print("=" * 60)
-        print(f"🛫 FLIGHT #{flight_number} - DRONE ARMED")
-        print("   Mission monitoring started.  ")
-        print("=" * 60)
+        logger.info("=" * 60)
+        logger.info(f"🛫 FLIGHT #{flight_number} - DRONE ARMED")
+        logger.info("   Mission monitoring started.  ")
+        logger.info("=" * 60)
         metrics.start_flight(True, pixhawk.battery_remaining)
         return True, flight_number
         
     elif not pixhawk.armed and was_armed:
         # Just disarmed
-        print(f"🛬 FLIGHT #{flight_number} - DRONE DISARMED")
+        logger.info(f"🛬 FLIGHT #{flight_number} - DRONE DISARMED")
         metrics.end_flight(True)
         captured_wp.clear()
         return False, flight_number + 1
@@ -125,7 +124,7 @@ def should_capture_image(pixhawk, waypoint, captured_wp, logger):
         return False
     
     if not is_drone_in_air(pixhawk):
-        print(f"⚠ Drone too low: {pixhawk.position['rel_alt']:.2f}m < {config.MIN_ALTITUDE_FOR_CAPTURE}m⚠")
+        logger.debug(f"⚠ Drone too low: {pixhawk.position['rel_alt']:.2f}m < {config.MIN_ALTITUDE_FOR_CAPTURE}m⚠")
         return False
     
     if waypoint in captured_wp:
@@ -142,10 +141,10 @@ def main_loop(pixhawk, camera, metrics, logger):
     was_in_air = False
     last_waypoint = None
     
-    print("=" * 60)
-    print("🍍 PINYASURI FLIGHT SYSTEM READY! 🚁")
-    print("System will run continuously. Press Ctrl+C to stop.")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info("🍍 PINYASURI FLIGHT SYSTEM READY! 🚁")
+    logger.info("System will run continuously. Press Ctrl+C to stop.")
+    logger.info("=" * 60)
 
     while running:
         # Update pixhawk telemetry
@@ -159,7 +158,7 @@ def main_loop(pixhawk, camera, metrics, logger):
         # Check for flight mode changes
         if pixhawk.mode != current_mode:
             current_mode = pixhawk.mode
-            print(f">>> Flight Mode: {current_mode}")
+            logger.info(f">>> Flight Mode: {current_mode}")
 
         # Update metrics during flight
         if pixhawk.armed:
@@ -178,23 +177,23 @@ def main_loop(pixhawk, camera, metrics, logger):
     
     return was_armed
 
-def cleanup(camera, metrics, was_armed, logger):
+def cleanup(camera, metrics, was_armed,):
     """Clean up resources before exit"""
-    print("=" * 60)
-    print("⚠ INITIATING SHUTDOWN ⚠")
-    print("=" * 60)
-    print(">>> Stopping mission tasks...")
+    logger.info("=" * 60)
+    logger.info("⚠ INITIATING SHUTDOWN ⚠")
+    logger.info("=" * 60)
+    logger.info(">>> Stopping mission tasks...")
 
     if was_armed:
-        print(">>> Finalizing flight metrics...")
+        logger.info(">>> Finalizing flight metrics...")
         metrics.end_flight(True)
     
     try:
         camera.close()
     except Exception as e:
-        print(f"⚠ Error closing camera: {e} ⚠")
+        logger.info(f"⚠ Error closing camera: {e} ⚠")
     
-    print("✓ Shutdown complete")
+    logger.info("✓ Shutdown complete")
 
 def main():
     global running
@@ -207,9 +206,9 @@ def main():
     camera = Camera()
     metrics = FlightMetrics()
 
-    print("=" * 60)
-    print("🍍 PINYASURI FLIGHT SYSTEM 🚁")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info("🍍 PINYASURI FLIGHT SYSTEM 🚁")
+    logger.info("=" * 60)
     
     # Wait for connection
     try:
@@ -220,21 +219,19 @@ def main():
         was_armed = main_loop(pixhawk, camera, metrics, logger)
         
     except KeyboardInterrupt:
-        print("")
-        print("=" * 60)
-        print("⚠ MANUAL STOP - Interrupted by user! ⚠")
-        print("=" * 60)
+        logger.info("")
+        logger.info("=" * 60)
+        logger.info("⚠ MANUAL STOP - Interrupted by user! ⚠")
+        logger.info("=" * 60)
         running = False
 
         time.sleep(0.5)
         was_armed = pixhawk.armed if pixhawk else False
     except Exception as e:
-        print(f"⚠ Fatal error: {e} ⚠", exc_info=True)
-        import traceback
-        traceback.print_exc()
+        logger.error(f"⚠ Fatal error: {e} ⚠", exc_info=True)
         was_armed = False
     finally:
-        cleanup(camera, metrics, was_armed)
+        cleanup(camera, metrics, was_armed, logger)
 
 if __name__ == "__main__":
     main()
