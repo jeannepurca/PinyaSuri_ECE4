@@ -170,7 +170,9 @@ picam2.configure(config)
 picam2.set_controls({"AfMode": controls.AfModeEnum.Continuous})
 
 output = StreamingOutput()
-picam2.start_recording(output, format='mjpeg')
+from picamera2.encoders import MJPEGEncoder
+encoder = MJPEGEncoder()
+picam2.start_recording(encoder, output)
 
 try:
     address = ('', 8000)
