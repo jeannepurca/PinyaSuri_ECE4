@@ -27,14 +27,14 @@ class Pixhawk:
         self.imu_accel = {"x": 0.0, "y": 0.0, "z": 0.0}
         self.battery_remaining = None
         self.battery_type = None
-        self.groundspeed = 0.0  # NEW
+        self.groundspeed = 0.0
 
         # Telemetry watchdog
         self.last_msg_time = None
         
-        # NEW: Waypoint reached tracking
-        self.wp_reached = set()  # Waypoints that have been reached
-        self.wp_just_reached = None  # Most recent waypoint reached
+        # Waypoint reached tracking
+        self.wp_reached = set()  # All waypoints ever reached
+        self.wp_pending_capture = set()  # Waypoints reached but not yet captured
 
     # ---------------------------------------------------------
     # CONNECTION & STREAM SETUP
@@ -77,7 +77,7 @@ class Pixhawk:
             mavutil.mavlink.MAVLINK_MSG_ID_MISSION_CURRENT, 2
         )
         
-        # NEW: Request waypoint reached messages
+        # Request waypoint reached messages
         self._request_message(
             mavutil.mavlink.MAVLINK_MSG_ID_MISSION_ITEM_REACHED, 2
         )
@@ -109,9 +109,6 @@ class Pixhawk:
         Drain MAVLink queue completely.
         This MUST be non-blocking and process ALL messages.
         """
-        
-        # Clear the "just reached" flag at the start of each update
-        self.wp_just_reached = None
 
         while True:
             msg = self.master.recv_match(blocking=False)
@@ -130,23 +127,31 @@ class Pixhawk:
                     "lon": msg.lon / 1e7,
                     "rel_alt": msg.relative_alt / 1000.0
                 }
-                # NEW: Extract groundspeed
+                # Extract groundspeed
                 self.groundspeed = math.sqrt(msg.vx**2 + msg.vy**2) / 100.0
 
             # -------------------------------
             # WAYPOINT (Current)
             # -------------------------------
             elif msg_type == "MISSION_CURRENT":
-                self.last_wp = msg.seq + 1  # convert to human-readable
+                new_wp = msg.seq + 1
+                # Only update if it's a valid waypoint number
+                if 0 <= new_wp <= 255:
+                    self.last_wp = new_wp
 
             # -------------------------------
-            # NEW: WAYPOINT REACHED EVENT
+            # WAYPOINT REACHED EVENT
             # -------------------------------
             elif msg_type == "MISSION_ITEM_REACHED":
-                wp_num = msg.seq + 1  # Convert to human-readable
-                self.wp_reached.add(wp_num)
-                self.wp_just_reached = wp_num
-                logger.info(f"🎯 Waypoint {wp_num} REACHED!")
+                # Only process in AUTO mode and for valid waypoint numbers
+                if self.mode == "AUTO" and 1 <= msg.seq < 255:
+                    wp_num = msg.seq + 1
+                    
+                    # Only process each waypoint once
+                    if wp_num not in self.wp_reached:
+                        self.wp_reached.add(wp_num)
+                        self.wp_pending_capture.add(wp_num)
+                        logger.info(f"🎯 Waypoint {wp_num} REACHED - pending capture!")
 
             # -------------------------------
             # HEARTBEAT (MODE + ARM)
@@ -184,17 +189,27 @@ class Pixhawk:
                     self.battery_type = "percent"
 
     # ---------------------------------------------------------
-    # NEW: Helper methods
+    # Helper methods
     # ---------------------------------------------------------
     
     def is_hovering(self, threshold=0.5):
         """Check if drone is hovering (velocity < threshold m/s)"""
         return self.groundspeed < threshold
     
+    def has_pending_capture(self, waypoint):
+        """Check if this waypoint is waiting for capture"""
+        return waypoint in self.wp_pending_capture
+    
+    def mark_waypoint_captured(self, waypoint):
+        """Call this after successfully capturing an image"""
+        if waypoint in self.wp_pending_capture:
+            self.wp_pending_capture.discard(waypoint)
+            logger.info(f"✓ Waypoint {waypoint} marked as captured")
+    
     def clear_reached_waypoints(self):
         """Clear the waypoint reached tracking (call when disarmed)"""
         self.wp_reached.clear()
-        self.wp_just_reached = None
+        self.wp_pending_capture.clear()
 
     # ---------------------------------------------------------
     # SAFETY / HEALTH

@@ -69,6 +69,9 @@ def handle_waypoint_capture(pixhawk, camera, metrics, waypoint, flight_number, c
     captured_wp.add(waypoint)
     metrics.increment_waypoint()
     
+    # Mark waypoint as captured in Pixhawk
+    pixhawk.mark_waypoint_captured(waypoint)
+    
     return True
 
 def get_telemetry_dict(pixhawk):
@@ -100,7 +103,7 @@ def handle_arm_state_change(pixhawk, metrics, was_armed, flight_number, captured
         logger.info(f"🛬 FLIGHT #{flight_number} - DRONE DISARMED")
         metrics.end_flight(True)
         captured_wp.clear()
-        pixhawk.clear_reached_waypoints()  # NEW: Clear waypoint reached tracking
+        pixhawk.clear_reached_waypoints()
         return False, flight_number + 1
     
     return was_armed, flight_number
@@ -134,16 +137,18 @@ def should_capture_image(pixhawk, waypoint, captured_wp, logger):
     if waypoint in captured_wp:
         return False
     
-    # NEW: Check if this waypoint was JUST reached (not just "current")
-    if pixhawk.wp_just_reached != waypoint:
+    # Check if this waypoint is pending capture
+    if not pixhawk.has_pending_capture(waypoint):
+        logger.debug(f"Waypoint {waypoint} not pending capture yet")
         return False
     
-    # Optional: Also check if hovering for extra stability
-    if not pixhawk.is_hovering(threshold=0.3):
+    # Check if hovering for stability
+    if not pixhawk.is_hovering(threshold=0.5):
         logger.debug(f"⚠ Still moving at {pixhawk.groundspeed:.2f} m/s")
         return False
     
-    # All failsafes passed!
+    # All checks passed!
+    logger.info(f"✓ All capture conditions met for WP{waypoint}!")
     return True
 
 def main_loop(pixhawk, camera, metrics, logger):
