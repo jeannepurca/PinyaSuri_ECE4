@@ -32,9 +32,8 @@ class Pixhawk:
         # Telemetry watchdog
         self.last_msg_time = None
         
-        # Waypoint reached tracking
-        self.wp_reached = set()  # All waypoints ever reached
-        self.wp_pending_capture = set()  # Waypoints reached but not yet captured
+        # Waypoint tracking (for logging/debugging only)
+        self.wp_reached_log = set()  # Just for logging purposes
 
     # ---------------------------------------------------------
     # CONNECTION & STREAM SETUP
@@ -140,18 +139,17 @@ class Pixhawk:
                     self.last_wp = new_wp
 
             # -------------------------------
-            # WAYPOINT REACHED EVENT
+            # WAYPOINT REACHED EVENT (for logging only)
             # -------------------------------
             elif msg_type == "MISSION_ITEM_REACHED":
-                # Only process in AUTO mode and for valid waypoint numbers
+                # Only log in AUTO mode and for valid waypoint numbers
                 if self.mode == "AUTO" and 1 <= msg.seq < 255:
                     wp_num = msg.seq + 1
                     
-                    # Only process each waypoint once
-                    if wp_num not in self.wp_reached:
-                        self.wp_reached.add(wp_num)
-                        self.wp_pending_capture.add(wp_num)
-                        logger.info(f"🎯 Waypoint {wp_num} REACHED - pending capture!")
+                    # Just log it, don't use for capture logic
+                    if wp_num not in self.wp_reached_log:
+                        self.wp_reached_log.add(wp_num)
+                        logger.debug(f"📍 Waypoint {wp_num} reached event received")
 
             # -------------------------------
             # HEARTBEAT (MODE + ARM)
@@ -196,20 +194,9 @@ class Pixhawk:
         """Check if drone is hovering (velocity < threshold m/s)"""
         return self.groundspeed < threshold
     
-    def has_pending_capture(self, waypoint):
-        """Check if this waypoint is waiting for capture"""
-        return waypoint in self.wp_pending_capture
-    
-    def mark_waypoint_captured(self, waypoint):
-        """Call this after successfully capturing an image"""
-        if waypoint in self.wp_pending_capture:
-            self.wp_pending_capture.discard(waypoint)
-            logger.info(f"✓ Waypoint {waypoint} marked as captured")
-    
-    def clear_reached_waypoints(self):
-        """Clear the waypoint reached tracking (call when disarmed)"""
-        self.wp_reached.clear()
-        self.wp_pending_capture.clear()
+    def clear_waypoint_log(self):
+        """Clear the waypoint log (call when disarmed)"""
+        self.wp_reached_log.clear()
 
     # ---------------------------------------------------------
     # SAFETY / HEALTH
