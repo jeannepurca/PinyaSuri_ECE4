@@ -30,19 +30,47 @@ def capture_image():
     farm_dir.mkdir(exist_ok=True)
 
     # Initialize the camera
+    print("Initializing camera...")
     picam2 = Picamera2()
     picam2.start()  # Start the camera
     time.sleep(2)  # Allow camera to warm up
-
-    # Create timestamped filename
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = farm_dir / f"{timestamp}.jpg"
-
-    # Capture the image
-    picam2.capture_file(str(filename))
-    print(f"Image saved to {filename}")
-
-    picam2.stop()  # Stop the camera
+    print("Camera ready!")
+    
+    try:
+        image_count = 0
+        print("\n" + "="*50)
+        print("CAPTURE MODE ACTIVE")
+        print("="*50)
+        print("Press ENTER to capture an image")
+        print("Type 'q' or 'quit' and press ENTER to exit")
+        print("="*50 + "\n")
+        
+        while True:
+            # Wait for user input
+            user_input = input("Ready to capture (or 'q' to quit): ").strip().lower()
+            
+            # Check if user wants to quit
+            if user_input in ['q', 'quit', 'exit']:
+                print("\nExiting capture mode...")
+                break
+            
+            # Capture the image (on Enter press or any other input)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = farm_dir / f"{timestamp}.jpg"
+            
+            picam2.capture_file(str(filename))
+            image_count += 1
+            print(f"✓ Image #{image_count} saved: {filename.name}")
+            
+    except KeyboardInterrupt:
+        print("\n\nInterrupted by user (Ctrl+C)")
+    
+    finally:
+        # Stop the camera
+        picam2.stop()
+        print(f"\nTotal images captured: {image_count}")
+        print(f"Images saved in: {farm_dir}")
+        print("Camera stopped. Goodbye!")
 
 if __name__ == "__main__":
     capture_image()
