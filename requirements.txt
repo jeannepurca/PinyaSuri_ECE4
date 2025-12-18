@@ -17,3 +17,5 @@ numpy>=1.21.0
 # Optional but recommended
 # For better async support
 aiofiles
+
+pymavlink>=0.3.0
