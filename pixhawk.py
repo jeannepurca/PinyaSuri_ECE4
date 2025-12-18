@@ -3,6 +3,7 @@
 
 import time
 import logging
+import math
 import config
 from pymavlink import mavutil
 
@@ -26,9 +27,14 @@ class Pixhawk:
         self.imu_accel = {"x": 0.0, "y": 0.0, "z": 0.0}
         self.battery_remaining = None
         self.battery_type = None
+        self.groundspeed = 0.0  # NEW
 
         # Telemetry watchdog
         self.last_msg_time = None
+        
+        # NEW: Waypoint reached tracking
+        self.wp_reached = set()  # Waypoints that have been reached
+        self.wp_just_reached = None  # Most recent waypoint reached
 
     # ---------------------------------------------------------
     # CONNECTION & STREAM SETUP
@@ -70,6 +76,11 @@ class Pixhawk:
         self._request_message(
             mavutil.mavlink.MAVLINK_MSG_ID_MISSION_CURRENT, 2
         )
+        
+        # NEW: Request waypoint reached messages
+        self._request_message(
+            mavutil.mavlink.MAVLINK_MSG_ID_MISSION_ITEM_REACHED, 2
+        )
 
         # Position & altitude
         self._request_message(
@@ -98,6 +109,9 @@ class Pixhawk:
         Drain MAVLink queue completely.
         This MUST be non-blocking and process ALL messages.
         """
+        
+        # Clear the "just reached" flag at the start of each update
+        self.wp_just_reached = None
 
         while True:
             msg = self.master.recv_match(blocking=False)
@@ -116,12 +130,23 @@ class Pixhawk:
                     "lon": msg.lon / 1e7,
                     "rel_alt": msg.relative_alt / 1000.0
                 }
+                # NEW: Extract groundspeed
+                self.groundspeed = math.sqrt(msg.vx**2 + msg.vy**2) / 100.0
 
             # -------------------------------
-            # WAYPOINT
+            # WAYPOINT (Current)
             # -------------------------------
             elif msg_type == "MISSION_CURRENT":
                 self.last_wp = msg.seq + 1  # convert to human-readable
+
+            # -------------------------------
+            # NEW: WAYPOINT REACHED EVENT
+            # -------------------------------
+            elif msg_type == "MISSION_ITEM_REACHED":
+                wp_num = msg.seq + 1  # Convert to human-readable
+                self.wp_reached.add(wp_num)
+                self.wp_just_reached = wp_num
+                logger.info(f"🎯 Waypoint {wp_num} REACHED!")
 
             # -------------------------------
             # HEARTBEAT (MODE + ARM)
@@ -157,6 +182,19 @@ class Pixhawk:
                 if self.battery_remaining is None and hasattr(msg, "battery_remaining"):
                     self.battery_remaining = msg.battery_remaining
                     self.battery_type = "percent"
+
+    # ---------------------------------------------------------
+    # NEW: Helper methods
+    # ---------------------------------------------------------
+    
+    def is_hovering(self, threshold=0.5):
+        """Check if drone is hovering (velocity < threshold m/s)"""
+        return self.groundspeed < threshold
+    
+    def clear_reached_waypoints(self):
+        """Clear the waypoint reached tracking (call when disarmed)"""
+        self.wp_reached.clear()
+        self.wp_just_reached = None
 
     # ---------------------------------------------------------
     # SAFETY / HEALTH
