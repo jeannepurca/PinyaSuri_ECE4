@@ -1,57 +1,30 @@
 #!/usr/bin/env python3
-"""
-Simple camera capture script for Raspberry Pi Camera Module v3
-Requires: picamera2 library (pre-installed on Raspberry Pi OS Bookworm)
-"""
 
-from picamera2 import Picamera2
-from libcamera import controls
 import time
+from picamera2 import Picamera2
 from datetime import datetime
+import os
 
-# Initialize the camera
-picam2 = Picamera2()
+# Directory to save captured images
+SAVE_DIR = "/home/pi/captured_images"
+os.makedirs(SAVE_DIR, exist_ok=True)
 
-# Configure camera for preview and capture
-# This creates a configuration with a preview stream and main capture stream
-config = picam2.create_preview_configuration(
-    main={"size": (4608, 2592)},  # Full resolution for Camera Module v3
-    lores={"size": (640, 480)},   # Lower resolution for preview
-    display="lores"
-)
-picam2.configure(config)
+def capture_image():
+    # Initialize the camera
+    picam2 = Picamera2()
+    picam2.start()  # Start the camera
 
-# Optional: Set autofocus mode (Camera Module v3 has autofocus)
-picam2.set_controls({"AfMode": controls.AfModeEnum.Continuous})
+    time.sleep(2)  # Allow camera to warm up
 
-# Start the camera
-picam2.start()
+    # Create a timestamped filename
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = os.path.join(SAVE_DIR, f"image_{timestamp}.jpg")
 
-print("Camera started. Preview window should appear.")
-print("Press Ctrl+C to exit")
-print()
+    # Capture the image
+    picam2.capture_file(filename)
+    print(f"Image saved to {filename}")
 
-try:
-    # Let camera warm up and adjust
-    time.sleep(2)
-    
-    while True:
-        # Wait for user input
-        input("Press Enter to capture an image (or Ctrl+C to exit)...")
-        
-        # Generate filename with timestamp
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"image_{timestamp}.jpg"
-        
-        # Capture image
-        picam2.capture_file(filename)
-        print(f"Image saved as: {filename}")
-        print()
+    picam2.stop()  # Stop the camera
 
-except KeyboardInterrupt:
-    print("\nExiting...")
-
-finally:
-    # Clean up
-    picam2.stop()
-    print("Camera stopped.")
+if __name__ == "__main__":
+    capture_image()
