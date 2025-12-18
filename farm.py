@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-
 import time
 from picamera2 import Picamera2
 from datetime import datetime
@@ -24,22 +23,32 @@ def capture_image():
     if not farm_name:
         print("Invalid farm name. Exiting...")
         return
-
+    
     # Create a folder for this farm
     farm_dir = FARM_IMAGE_DIR / farm_name
     farm_dir.mkdir(exist_ok=True)
-
-    # Initialize the camera
+    
+    # Initialize the camera with maximum resolution
     print("Initializing camera...")
     picam2 = Picamera2()
+    
+    # Configure for maximum still image resolution
+    config = picam2.create_still_configuration()
+    picam2.configure(config)
+    
     picam2.start()  # Start the camera
     time.sleep(2)  # Allow camera to warm up
+    
+    # Display camera info
+    camera_props = picam2.camera_properties
+    print(f"Camera: {camera_props.get('Model', 'Unknown')}")
+    print(f"Max resolution: {config['main']['size']}")
     print("Camera ready!")
     
     try:
         image_count = 0
         print("\n" + "="*50)
-        print("CAPTURE MODE ACTIVE")
+        print("CAPTURE MODE ACTIVE - MAX RESOLUTION")
         print("="*50)
         print("Press ENTER to capture an image")
         print("Type 'q' or 'quit' and press ENTER to exit")
