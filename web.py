@@ -13,7 +13,7 @@ from threading import Condition, Thread
 from datetime import datetime
 import time
 
-class StreamingOutput(io.BufferedIOBase):
+class StreamingOutput:
     def __init__(self):
         self.frame = None
         self.condition = Condition()
@@ -22,6 +22,7 @@ class StreamingOutput(io.BufferedIOBase):
         with self.condition:
             self.frame = buf
             self.condition.notify_all()
+        return len(buf)
 
 
 class StreamingHandler(server.BaseHTTPRequestHandler):
