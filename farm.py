@@ -37,7 +37,15 @@ def capture_image():
     picam2.configure(config)
     
     picam2.start()  # Start the camera
-    time.sleep(2)  # Allow camera to warm up
+    
+    # Set autofocus mode to continuous (for Camera Module 3)
+    try:
+        picam2.set_controls({"AfMode": 2, "AfTrigger": 0})  # AfMode 2 = Continuous
+        print("Autofocus enabled (continuous mode)")
+    except Exception as e:
+        print(f"Note: Autofocus not available on this camera ({e})")
+    
+    time.sleep(2)  # Allow camera to warm up and focus
     
     # Display camera info
     camera_props = picam2.camera_properties
@@ -62,6 +70,14 @@ def capture_image():
             if user_input in ['q', 'quit', 'exit']:
                 print("\nExiting capture mode...")
                 break
+            
+            # Trigger autofocus before capture (for Camera Module 3)
+            try:
+                picam2.set_controls({"AfTrigger": 0})
+                time.sleep(1)  # Wait for autofocus to complete
+                print("Focusing...")
+            except:
+                pass
             
             # Capture the image (on Enter press or any other input)
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
