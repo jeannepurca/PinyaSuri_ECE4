@@ -2,7 +2,7 @@
 import time
 from picamera2 import Picamera2
 from picamera2.encoders import H264Encoder
-from picamera2.outputs import MP4Output
+from picamera2.outputs import FfmpegOutput
 from libcamera import controls
 from datetime import datetime
 from pathlib import Path
@@ -68,7 +68,12 @@ def record_video():
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 filename = farm_dir / f"{timestamp}.mp4"
 
-                output = MP4Output(str(filename))
+                output = FfmpegOutput(
+                    str(filename),
+                    audio=False,
+                    video_codec="copy"  # no re-encoding
+                )
+
                 picam2.start_recording(encoder, output)
 
                 recording = True
