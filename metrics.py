@@ -76,7 +76,7 @@ class FlightMetrics:
             self.waypoints_completed = 0
             self.last_position = None
 
-            logger.info(f"🛫 Flight {self.current_flight_number} started")
+            logger.info(f"🛫 Flight {self.current_flight_number} started.")
 
     # Flight Lifecycle - End
     def end_flight(self, disarmed_state):

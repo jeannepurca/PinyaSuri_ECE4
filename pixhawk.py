@@ -4,11 +4,11 @@
 import time
 import logging
 import math
+from collections import deque
 import config
 from pymavlink import mavutil
 
 logger = logging.getLogger("Pixhawk")
-
 
 class Pixhawk:
     def __init__(self):
@@ -17,7 +17,7 @@ class Pixhawk:
             baud=57600
         )
 
-        # Flight state
+        # Flight State
         self.last_wp = None
         self.position = None
         self.armed = False
@@ -29,24 +29,25 @@ class Pixhawk:
         self.battery_type = None
         self.groundspeed = 0.0
 
-        # Telemetry watchdog
+        # Telemetry
         self.last_msg_time = None
-        
-        # Waypoint tracking (for logging/debugging only)
-        self.wp_reached_log = set()  # Just for logging purposes
+
+        # Waypoint Tracking
+        self.wp_reached_log = set()
+
+        # Altitude Stability Tracking
+        self.altitude_history = deque(maxlen=10)
 
     # ---------------------------------------------------------
     # CONNECTION & STREAM SETUP
     # ---------------------------------------------------------
-
     def wait_for_connection(self):
         logger.info(">>> Waiting for heartbeat...")
         self.master.wait_heartbeat()
         logger.info("✓ Pixhawk connected successfully!")
-
         self._request_required_streams()
-        logger.info("✓ MAVLink streams configured")
-
+        logger.info("✓ MAVLink streams configured!")
+    
     def _request_message(self, msg_id, rate_hz):
         """Request a MAVLink message at a specific rate"""
         interval_us = int(1e6 / rate_hz)
@@ -57,7 +58,7 @@ class Pixhawk:
             mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL,
             0,
             msg_id,
-            interval_us,
+            interval_us, 
             0, 0, 0, 0, 0
         )
 
@@ -66,49 +67,34 @@ class Pixhawk:
     def _request_required_streams(self):
         logger.info(">>> Requesting MAVLink message streams...")
 
-        # Core system state
-        self._request_message(
-            mavutil.mavlink.MAVLINK_MSG_ID_HEARTBEAT, 1
-        )
+        # Core System State
+        self._request_message(mavutil.mavlink.MAVLINK_MSG_ID_HEARTBEAT, 1)
 
-        # Mission / waypoints
-        self._request_message(
-            mavutil.mavlink.MAVLINK_MSG_ID_MISSION_CURRENT, 2
-        )
-        
-        # Request waypoint reached messages
-        self._request_message(
-            mavutil.mavlink.MAVLINK_MSG_ID_MISSION_ITEM_REACHED, 2
-        )
+        # Mission/Waypoints
+        self._request_message(mavutil.mavlink.MAVLINK_MSG_ID_MISSION_CURRENT, 5)
 
-        # Position & altitude
-        self._request_message(
-            mavutil.mavlink.MAVLINK_MSG_ID_GLOBAL_POSITION_INT, 5
-        )
+        # Request waypoint reached messages at higher rate
+        self._request_message(mavutil.mavlink.MAVLINK_MSG_ID_MISSION_ITEM_REACHED, 5)
 
-        # Battery info
-        self._request_message(
-            mavutil.mavlink.MAVLINK_MSG_ID_BATTERY_STATUS, 1
-        )
-        self._request_message(
-            mavutil.mavlink.MAVLINK_MSG_ID_SYS_STATUS, 1
-        )
+        # Position & Altitude
+        self._request_message(mavutil.mavlink.MAVLINK_MSG_ID_GLOBAL_POSITION_INT, 10)
 
-        # IMU
-        self._request_message(
-            mavutil.mavlink.MAVLINK_MSG_ID_RAW_IMU, 5
-        )
+        # Battery
+        self._request_message(mavutil.mavlink.MAVLINK_MSG_ID_BATTERY_STATUS, 1)
+        self._request_message(mavutil.mavlink.MAVLINK_MSG_ID_SYS_STATUS, 1)
+
+        # IMU Data
+        self._request_message(mavutil.mavlink.MAVLINK_MSG_ID_RAW_IMU, 5)
 
     # ---------------------------------------------------------
     # TELEMETRY UPDATE LOOP
-    # ---------------------------------------------------------
-
+    # ---------------------------------------------------------    
     def update(self):
         """
         Drain MAVLink queue completely.
         This MUST be non-blocking and process ALL messages.
         """
-
+        
         while True:
             msg = self.master.recv_match(blocking=False)
             if not msg:
@@ -128,6 +114,9 @@ class Pixhawk:
                 }
                 # Extract groundspeed
                 self.groundspeed = math.sqrt(msg.vx**2 + msg.vy**2) / 100.0
+                
+                # Track altitude history for stability detection
+                self.altitude_history.append(self.position["rel_alt"])
 
             # -------------------------------
             # WAYPOINT (Current)
@@ -136,20 +125,21 @@ class Pixhawk:
                 new_wp = msg.seq + 1
                 # Only update if it's a valid waypoint number
                 if 0 <= new_wp <= 255:
+                    if self.last_wp != new_wp:
+                        logger.debug(f"> Waypoint changed: {self.last_wp} -> {new_wp}")
                     self.last_wp = new_wp
 
             # -------------------------------
-            # WAYPOINT REACHED EVENT (for logging only)
+            # WAYPOINT REACHED EVENT
             # -------------------------------
             elif msg_type == "MISSION_ITEM_REACHED":
-                # Only log in AUTO mode and for valid waypoint numbers
+                # Only process in AUTO mode and for valid waypoint numbers
                 if self.mode == "AUTO" and 1 <= msg.seq < 255:
                     wp_num = msg.seq + 1
                     
-                    # Just log it, don't use for capture logic
                     if wp_num not in self.wp_reached_log:
                         self.wp_reached_log.add(wp_num)
-                        logger.debug(f"📍 Waypoint {wp_num} reached event received")
+                        logger.info(f"✓ WAYPOINT {wp_num} REACHED, CONFIRMED!")
 
             # -------------------------------
             # HEARTBEAT (MODE + ARM)
@@ -187,21 +177,50 @@ class Pixhawk:
                     self.battery_type = "percent"
 
     # ---------------------------------------------------------
-    # Helper methods
+    # Stability Detection Methods
     # ---------------------------------------------------------
-    
     def is_hovering(self, threshold=0.5):
-        """Check if drone is hovering (velocity < threshold m/s)"""
+        """Check if drone is hovering (horizontal velocity < threshold m/s)"""
         return self.groundspeed < threshold
     
+    def is_altitude_stable(self, threshold=0.5, window_size=7):
+        """
+        Check if altitude is stable (not changing rapidly).
+        
+        Args:
+            threshold: Maximum acceptable altitude variation in meters
+            window_size: Number of recent samples to check
+        
+        Returns:
+            True if altitude variation is within threshold
+        """
+        if len(self.altitude_history) < window_size:
+            return False
+        
+        # Get recent altitude samples
+        recent_altitudes = list(self.altitude_history)[-window_size:]
+        
+        # Calculate variation (max - min)
+        variation = max(recent_altitudes) - min(recent_altitudes)
+        
+        return variation <= threshold
+    
+    def get_altitude_variation(self):
+        """Get current altitude variation for debugging"""
+        if len(self.altitude_history) < 2:
+            return 0.0
+        
+        recent_altitudes = list(self.altitude_history)
+        return max(recent_altitudes) - min(recent_altitudes)
+    
     def clear_waypoint_log(self):
-        """Clear the waypoint log (call when disarmed)"""
+        """Clear the waypoint log (call when disarmed/new flight)"""
         self.wp_reached_log.clear()
+        logger.debug("✓ Cleared waypoint reached log.")
 
     # ---------------------------------------------------------
     # SAFETY / HEALTH
     # ---------------------------------------------------------
-
     def telemetry_ok(self, timeout=2.0):
         """Returns False if telemetry is stale"""
         if self.last_msg_time is None:
