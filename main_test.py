@@ -48,6 +48,7 @@ def log_image_capture(flight_number, waypoint, position, image_path):
 
 def handle_waypoint_capture(pixhawk, camera, metrics, waypoint, flight_number, captured_wp, logger):
     """Capture image at waypoint and log data"""
+
     if waypoint in captured_wp:
         return False
     
@@ -55,30 +56,79 @@ def handle_waypoint_capture(pixhawk, camera, metrics, waypoint, flight_number, c
     logger.info(f">>> WAYPOINT {waypoint} REACHED - Capturing image...")
     logger.info("=" * 60)
     
-    # CRITICAL FIX: Add stabilization delay
-    # Wait for drone to fully stabilize before capturing
-    logger.info(">>> Waiting for drone to stabilize...")
-    time.sleep(2.5)
+    # Configuration
+    max_wait_time = 6.0  # Max wait (Mission Planner handles the 10s hover)
+    check_interval = 0.4  # Check every 0.4 seconds
+    stable_checks_needed = 2  # Need 2 consecutive stable readings
     
-    # Double-check we're still hovering after the delay
-    pixhawk.update()
-    if not pixhawk.is_hovering(threshold=0.3):
-        logger.warning(f"⚠ Drone still moving after delay! Speed: {pixhawk.groundspeed:.2f} m/s")
+    # Relaxed thresholds for outdoor conditions
+    speed_threshold = 0.6  # m/s (forgiving for wind)
+    altitude_threshold = 0.8  # m (forgiving for air turbulence)
+    
+    logger.info(">>> Waiting for drone to stabilize...")
+    
+    stable_count = 0
+    elapsed = 0.0
+    
+    while elapsed < max_wait_time:
+        time.sleep(check_interval)
+        elapsed += check_interval
+        
+        # Update telemetry
+        pixhawk.update()
+        
+        # Check if drone is stable
+        is_hovering = pixhawk.is_hovering(threshold=speed_threshold)
+        is_alt_stable = pixhawk.is_altitude_stable(
+            threshold=altitude_threshold, 
+            window_size=5
+        )
+        
+        if is_hovering and is_alt_stable:
+            stable_count += 1
+            logger.info(f"  ✓ Stable check {stable_count}/{stable_checks_needed} "
+                       f"(speed: {pixhawk.groundspeed:.2f} m/s, "
+                       f"alt var: {pixhawk.get_altitude_variation():.2f} m)")
+            
+            if stable_count >= stable_checks_needed:
+                logger.info(f"✓ Drone stabilized after {elapsed:.1f}s - Capturing now!")
+                break
+        else:
+            # Reset counter if drone becomes unstable
+            if stable_count > 0:
+                logger.debug(f"  ○ Lost stability - rechecking... "
+                           f"(speed: {pixhawk.groundspeed:.2f} m/s)")
+            stable_count = 0
+    
+    # Check if we achieved stability
+    if stable_count < stable_checks_needed:
+        logger.warning(f"⚠ Could not achieve stable hover after {elapsed:.1f}s")
+        logger.warning(f"  Current speed: {pixhawk.groundspeed:.2f} m/s")
+        logger.warning(f"  Altitude variation: {pixhawk.get_altitude_variation():.2f} m")
+        logger.warning(f"  Mission Planner will hold for {10 - elapsed:.1f}s more")
+        logger.warning("  Skipping capture this attempt")
         return False
     
-    image_path = camera.capture(
-        waypoint=waypoint,
-        flight_number=flight_number,
-        prefix="pinyasuri"
-    )
-    
-    log_image_capture(flight_number, waypoint, pixhawk.position, image_path)
-    
-    logger.info(f"> Captured WP{waypoint} at {pixhawk.position['rel_alt']:.1f}m altitude")
-    captured_wp.add(waypoint)
-    metrics.increment_waypoint()
-    
-    return True
+    # Capture image immediately after stability confirmed
+    try:
+        image_path = camera.capture(
+            waypoint=waypoint,
+            flight_number=flight_number,
+            prefix="pinyasuri"
+        )
+        
+        log_image_capture(flight_number, waypoint, pixhawk.position, image_path)
+        
+        logger.info(f"✓ CAPTURED WP{waypoint} at {pixhawk.position['rel_alt']:.1f}m altitude")
+        logger.info(f"  Image: {image_path}")
+        captured_wp.add(waypoint)
+        metrics.increment_waypoint()
+        
+        return True
+        
+    except Exception as e:
+        logger.error(f"⚠ Camera capture failed: {e}")
+        return False
 
 def get_telemetry_dict(pixhawk):
     """Build telemetry dictionary for metrics"""
@@ -141,28 +191,28 @@ def should_capture_image(pixhawk, waypoint, captured_wp, logger):
     if not is_drone_in_air(pixhawk):
         return False
     
-    # 5. Must have already captured this waypoint
+    # 5. Must NOT have already captured this waypoint
     if waypoint in captured_wp:
         return False
     
-    # IMPORTANT: Only capture at actual mapping waypoints (not takeoff/RTL)
+    # 6. Only capture at actual mapping waypoints (not takeoff/RTL)
     valid_capture_waypoints = [2, 3, 4]
     if waypoint not in valid_capture_waypoints:
         return False
     
-    # CRITICAL FIX #1: Stricter hover detection
-    # Use tighter threshold to ensure drone is truly stationary
-    if not pixhawk.is_hovering(threshold=0.3):
+    # 7. RELAXED hover detection for outdoor conditions
+    # Mission Planner holds for 10s, so we can be more forgiving
+    if not pixhawk.is_hovering(threshold=0.6):  # Relaxed for wind
         logger.debug(f"⚠ Still moving at {pixhawk.groundspeed:.2f} m/s")
         return False
     
-    # CRITICAL FIX #2: Altitude stability check
-    # Ensure altitude isn't changing rapidly (vertical stabilization)
-    if not pixhawk.is_altitude_stable(threshold=0.5, window_size=7):
+    # 8. RELAXED altitude stability check
+    # More forgiving since Mission Planner handles the hover
+    if not pixhawk.is_altitude_stable(threshold=0.8, window_size=5):  # Very forgiving
         logger.debug(f"⚠ Altitude not stable: {pixhawk.get_altitude_variation():.2f} m variation")
         return False
     
-    # CRITICAL FIX #3: Verify waypoint was actually reached
+    # 9. Verify waypoint was actually reached
     # Check if we received the MISSION_ITEM_REACHED event for this waypoint
     if waypoint not in pixhawk.wp_reached_log:
         logger.debug(f"⚠ WP{waypoint} not confirmed reached yet")
