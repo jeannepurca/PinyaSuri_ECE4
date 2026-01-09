@@ -3,8 +3,11 @@
 
 import time
 import logging
+import math
 from gpiozero import Servo
 from gpiozero.pins.pigpio import PiGPIOFactory
+
+import config
 
 logger = logging.getLogger("Gimbal")
 
@@ -54,19 +57,11 @@ class CameraGimbal:
     """
     
     def __init__(self, 
-                 roll_pin=17, 
-                 pitch_pin=27,
-                 target_pitch=-45,
-                 max_roll_compensation=30):
-        """
-        Initialize gimbal controller
-        
-        Args:
-            roll_pin: GPIO pin for roll servo (BCM numbering)
-            pitch_pin: GPIO pin for pitch servo (BCM numbering)
-            target_pitch: Fixed camera pitch angle in degrees (negative = down)
-            max_roll_compensation: Maximum roll compensation angle
-        """
+                 roll_pin=config.GIMBAL_ROLL_PIN, 
+                 pitch_pin=config.GIMBAL_PITCH_PIN,
+                 target_pitch=config.GIMBAL_TARGET_PITCH,
+                 max_roll_compensation=config.GIMBAL_MAX_ROLL_COMPENSATION):
+ 
         
         self.target_pitch = target_pitch
         self.max_roll_compensation = max_roll_compensation
@@ -89,9 +84,9 @@ class CameraGimbal:
         # PID controller for roll stabilization
         # Conservative gains for SG90 servos
         self.roll_pid = PIDController(
-            kp=0.8,   # Proportional gain
-            ki=0.05,  # Integral gain (small to prevent windup)
-            kd=0.1    # Derivative gain (damping)
+            kp=config.GIMBAL_PID_KP,   # Proportional gain
+            ki=config.GIMBAL_PID_KI,  # Integral gain (small to prevent windup)
+            kd=config.GIMBAL_PID_KD    # Derivative gain (damping)
         )
         
         # State tracking
