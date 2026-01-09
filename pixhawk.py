@@ -85,7 +85,7 @@ class Pixhawk:
         self._request_message(mavutil.mavlink.MAVLINK_MSG_ID_GLOBAL_POSITION_INT, 10)
 
         # Attitude
-        self._request_message(mavutil.mavlink.MAVLINK_MSG_ID_ATTITUDE, 20)
+        self._request_message(mavutil.mavlink.MAVLINK_MSG_ID_ATTITUDE, 50)
 
         # Battery
         self._request_message(mavutil.mavlink.MAVLINK_MSG_ID_BATTERY_STATUS, 1)
@@ -139,8 +139,7 @@ class Pixhawk:
             # WAYPOINT (Current)
             # -------------------------------
             elif msg_type == "MISSION_CURRENT":
-                new_wp = msg.seq + 1
-                # Only update if it's a valid waypoint number
+                new_wp = msg.seq
                 if 0 <= new_wp <= 255:
                     if self.last_wp != new_wp:
                         logger.debug(f"> Waypoint changed: {self.last_wp} -> {new_wp}")
@@ -150,20 +149,14 @@ class Pixhawk:
             # WAYPOINT REACHED EVENT
             # -------------------------------
             elif msg_type == "MISSION_ITEM_REACHED":
-                # Only process in AUTO mode and for valid waypoint numbers
-                if self.mode == "AUTO" and 1 <= msg.seq < 255:
-                    wp_num = msg.seq + 1
-                    
-                    # Only log waypoint as reached if drone is actually in the air
+                if self.mode == "AUTO" and 0 <= msg.seq <= 255:
+                    wp_num = msg.seq
+
                     if self.position and self.position["rel_alt"] >= config.MIN_ALTITUDE_FOR_CAPTURE:
                         if wp_num not in self.wp_reached_log:
                             self.wp_reached_log.add(wp_num)
                             wp_name = config.get_waypoint_name(wp_num)
                             logger.info(f"✓ {wp_name} (WP{wp_num}) REACHED, CONFIRMED!")
-                    else:
-                        wp_name = config.get_waypoint_name(wp_num)
-                        alt_str = f"{self.position['rel_alt']:.1f}m" if self.position else "N/A"
-                        logger.debug(f"⚠ Ignoring {wp_name} (WP{wp_num}) REACHED - drone not airborne (alt: {alt_str})")
 
             # -------------------------------
             # HEARTBEAT (MODE + ARM)

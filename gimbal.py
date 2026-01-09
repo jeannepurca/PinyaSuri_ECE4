@@ -8,55 +8,41 @@ from gpiozero.pins.pigpio import PiGPIOFactory
 
 logger = logging.getLogger("Gimbal")
 
+CONTROL_HZ = 50.0
+DT = 1.0 / CONTROL_HZ
+
 class PIDController:
-    """Simple PID controller for smooth servo movements"""
+    """PID controller with FIXED timestep (no Linux jitter)"""
     def __init__(self, kp, ki, kd, output_limits=(-1, 1)):
         self.kp = kp
         self.ki = ki
         self.kd = kd
         self.output_limits = output_limits
-        
-        self.integral = 0
-        self.previous_error = 0
-        self.previous_time = time.time()
+
+        self.integral = 0.0
+        self.prev_error = 0.0
     
     def update(self, error):
-        current_time = time.time()
-        dt = current_time - self.previous_time
-        
-        if dt <= 0:
-            dt = 0.01
-        
         # Proportional
-        p_term = self.kp * error
-        
-        # Integral with anti-windup
-        self.integral += error * dt
-        self.integral = max(min(self.integral, 10), -10)
-        i_term = self.ki * self.integral
-        
-        # Derivative
-        derivative = (error - self.previous_error) / dt
-        d_term = self.kd * derivative
-        
-        # Calculate output
-        output = p_term + i_term + d_term
-        
-        # Limit output
-        output = max(min(output, self.output_limits[1]), self.output_limits[0])
-        
-        # Update state
-        self.previous_error = error
-        self.previous_time = current_time
-        
-        return output
-    
-    def reset(self):
-        """Reset PID state"""
-        self.integral = 0
-        self.previous_error = 0
-        self.previous_time = time.time()
+        p = self.kp * error
 
+        # Integral (anti-windup)
+        self.integral += error * DT
+        self.integral = max(min(self.integral, 5.0), -5.0)
+        i = self.ki * self.integral
+
+        # Derivative
+        d = self.kd * (error - self.prev_error) / DT
+
+        output = p + i + d
+        output = max(min(output, self.output_limits[1]), self.output_limits[0])
+
+        self.prev_error = error
+        return output
+
+    def reset(self):
+        self.integral = 0.0
+        self.prev_error = 0.0
 
 class CameraGimbal:
     """
@@ -281,19 +267,14 @@ class CameraGimbal:
     def cleanup(self):
         """Safely shutdown gimbal (center servos and cleanup)"""
         logger.info("⚠ Shutting down gimbal...")
-        
+
         # Center roll servo
         self.set_roll_compensation(0)
-        time.sleep(0.5)
-        
-        # Close servos
-        try:
-            self.roll_servo.close()
-            self.pitch_servo.close()
-            logger.info("✓ Gimbal shutdown complete")
-        except Exception as e:
-            logger.warning(f"⚠ Error during gimbal cleanup: {e}")
+        time.sleep(0.4)
 
+        # Close servos
+        self.roll_servo.close()
+        self.pitch_servo.close()
 
 # ============================================================================
 # TESTING FUNCTIONS (for standalone testing)

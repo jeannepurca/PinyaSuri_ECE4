@@ -7,6 +7,7 @@ import logging
 import sys
 
 import config
+from logging_config import setup_logging
 from pixhawk import Pixhawk
 from camera import Camera
 from metrics import FlightMetrics
@@ -14,18 +15,7 @@ from gimbal import CameraGimbal
 
 running = True
 
-def setup_logging():
-    """Configure logging system"""
-    config.ensure_directories()
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(levelname)s:%(name)s:%(message)s',
-        handlers=[
-            logging.FileHandler(config.LOG_DIR / "test_flight.log"),
-            logging.StreamHandler()
-        ]
-    )
-    return logging.getLogger("TestFlight")
+logger = logging.getLogger("PinyaSuri")
 
 def initialize_csv():
     """Create image log CSV with headers"""
@@ -329,15 +319,16 @@ def main():
     gimbal = None
     try:
         gimbal = CameraGimbal(
-            GIMBAL_ROLL_PIN=17,      # GPIO 17 for roll servo
-            GIMBAL_PITCH_PIN=27,     # GPIO 27 for pitch servo
-            GIMBAL_TARGET_PITCH=-45, # 45° downward angle
-            GIMBAL_MAX_ROLL_COMPENSATION=30  # ±30° max roll compensation
+            roll_pin=17,
+            pitch_pin=27,
+            target_pitch=-45,
+            max_roll_compensation=30,
+            use_mpu6050=config.USE_MPU6050,  # Enable MPU6050
+            mpu6050_address=config.MPU6050_I2C_ADDRESS
         )
         logger.info("✓ Gimbal initialized successfully")
     except Exception as e:
         logger.warning(f"⚠ Gimbal initialization failed: {e}")
-        logger.warning("⚠ Continuing WITHOUT gimbal stabilization ⚠")
         gimbal = None
 
     logger.info("=" * 60)

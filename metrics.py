@@ -17,6 +17,7 @@ class FlightMetrics:
         self.altitude_window = deque(maxlen=window_size)
         self.accel_window = deque(maxlen=window_size)
         self.position_window = deque(maxlen=window_size)
+
         # Flight-wide metrics
         self.flight_start_time = None
         self.flight_end_time = None
@@ -30,6 +31,7 @@ class FlightMetrics:
         self.battery_start = None
         self.battery_end = None
         self.current_flight_number = 1
+        
         # CSV file
         self._initialize_csv()
 
