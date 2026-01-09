@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# main_test.py
+# main_test.py - Integrated with gimbal stabilization
 
 import time
 import csv
@@ -10,6 +10,7 @@ import config
 from pixhawk import Pixhawk
 from camera import Camera
 from metrics import FlightMetrics
+from gimbal import CameraGimbal
 
 running = True
 
@@ -143,7 +144,7 @@ def get_telemetry_dict(pixhawk):
         "battery_remaining": pixhawk.battery_remaining
     }
 
-def handle_arm_state_change(pixhawk, metrics, was_armed, flight_number, captured_wp, logger):
+def handle_arm_state_change(pixhawk, metrics, gimbal, was_armed, flight_number, captured_wp, logger):
     """Detect and handle arm/disarm transitions"""
     if pixhawk.armed and not was_armed:
         # Just armed
@@ -153,6 +154,11 @@ def handle_arm_state_change(pixhawk, metrics, was_armed, flight_number, captured
         logger.info("=" * 60)
         metrics.start_flight(True, pixhawk.battery_remaining)
         pixhawk.clear_waypoint_log()  # Clear old waypoint logs
+        
+        # Enable gimbal stabilization
+        if gimbal:
+            gimbal.enable()
+        
         return True, flight_number
         
     elif not pixhawk.armed and was_armed:
@@ -161,6 +167,11 @@ def handle_arm_state_change(pixhawk, metrics, was_armed, flight_number, captured
         metrics.end_flight(True)
         captured_wp.clear()
         pixhawk.clear_waypoint_log()
+        
+        # Disable gimbal and center servos
+        if gimbal:
+            gimbal.disable()
+        
         return False, flight_number + 1
     
     return was_armed, flight_number
@@ -222,7 +233,7 @@ def should_capture_image(pixhawk, waypoint, captured_wp, logger):
     logger.info(f"✓ All capture conditions met for WP{waypoint}!")
     return True
 
-def main_loop(pixhawk, camera, metrics, logger):
+def main_loop(pixhawk, camera, metrics, gimbal, logger):
     captured_wp = set()
     flight_number = 1
     was_armed = False
@@ -230,6 +241,8 @@ def main_loop(pixhawk, camera, metrics, logger):
     
     logger.info("=" * 60)
     logger.info("🍍 PINYASURI FLIGHT SYSTEM READY! 🚁")
+    if gimbal:
+        logger.info("🎥 Gimbal stabilization: ENABLED")
     logger.info("System will run continuously. Press Ctrl+C to stop.")
     logger.info("=" * 60)
 
@@ -237,9 +250,18 @@ def main_loop(pixhawk, camera, metrics, logger):
         # Update pixhawk telemetry
         pixhawk.update()
         
+        # Update gimbal stabilization (if enabled)
+        if gimbal and gimbal.enabled:
+            # Get current drone attitude
+            drone_roll = pixhawk.get_roll()
+            drone_pitch = pixhawk.get_pitch()
+            
+            # Update gimbal to compensate for roll
+            gimbal.update(drone_roll, drone_pitch)
+        
         # Handle arm/disarm state changes
         was_armed, flight_number = handle_arm_state_change(
-            pixhawk, metrics, was_armed, flight_number, captured_wp, logger
+            pixhawk, metrics, gimbal, was_armed, flight_number, captured_wp, logger
         )
 
         # Check for flight mode changes
@@ -264,7 +286,7 @@ def main_loop(pixhawk, camera, metrics, logger):
     
     return was_armed
 
-def cleanup(camera, metrics, was_armed, logger):
+def cleanup(camera, metrics, gimbal, was_armed, logger):
     """Clean up resources before exit"""
     logger.info("=" * 60)
     logger.info("⚠ INITIATING SHUTDOWN ⚠")
@@ -275,6 +297,14 @@ def cleanup(camera, metrics, was_armed, logger):
         logger.info(">>> Finalizing flight metrics...")
         metrics.end_flight(True)
     
+    # Cleanup gimbal
+    if gimbal:
+        try:
+            gimbal.cleanup()
+        except Exception as e:
+            logger.warning(f"⚠ Error cleaning up gimbal: {e}")
+    
+    # Cleanup camera
     try:
         camera.close()
     except Exception as e:
@@ -292,6 +322,21 @@ def main():
     pixhawk = Pixhawk()
     camera = Camera()
     metrics = FlightMetrics()
+    
+    # Initialize gimbal (optional - set to None to disable)
+    gimbal = None
+    try:
+        gimbal = CameraGimbal(
+            roll_pin=17,      # GPIO 17 for roll servo
+            pitch_pin=27,     # GPIO 27 for pitch servo
+            target_pitch=-45, # 45° downward angle
+            max_roll_compensation=30  # ±30° max roll compensation
+        )
+        logger.info("✓ Gimbal initialized successfully")
+    except Exception as e:
+        logger.warning(f"⚠ Gimbal initialization failed: {e}")
+        logger.warning("⚠ Continuing WITHOUT gimbal stabilization ⚠")
+        gimbal = None
 
     logger.info("=" * 60)
     logger.info("🍍 PINYASURI FLIGHT SYSTEM 🚁")
@@ -303,7 +348,7 @@ def main():
         initialize_csv()
         
         # Run main loop
-        was_armed = main_loop(pixhawk, camera, metrics, logger)
+        was_armed = main_loop(pixhawk, camera, metrics, gimbal, logger)
         
     except KeyboardInterrupt:
         logger.info("")
@@ -318,7 +363,7 @@ def main():
         logger.error(f"⚠ Fatal error: {e} ⚠", exc_info=True)
         was_armed = False
     finally:
-        cleanup(camera, metrics, was_armed, logger)
+        cleanup(camera, metrics, gimbal, was_armed, logger)
 
 if __name__ == "__main__":
     main()

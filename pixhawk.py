@@ -29,6 +29,11 @@ class Pixhawk:
         self.battery_type = None
         self.groundspeed = 0.0
 
+        # Attitude Data
+        self.roll = 0.0   # degrees
+        self.pitch = 0.0  # degrees
+        self.yaw = 0.0    # degrees
+
         # Telemetry
         self.last_msg_time = None
 
@@ -79,6 +84,9 @@ class Pixhawk:
         # Position & Altitude
         self._request_message(mavutil.mavlink.MAVLINK_MSG_ID_GLOBAL_POSITION_INT, 10)
 
+        # Attitude
+        self._request_message(mavutil.mavlink.MAVLINK_MSG_ID_ATTITUDE, 20)
+
         # Battery
         self._request_message(mavutil.mavlink.MAVLINK_MSG_ID_BATTERY_STATUS, 1)
         self._request_message(mavutil.mavlink.MAVLINK_MSG_ID_SYS_STATUS, 1)
@@ -117,6 +125,15 @@ class Pixhawk:
                 
                 # Track altitude history for stability detection
                 self.altitude_history.append(self.position["rel_alt"])
+
+            # -------------------------------
+            # ATTITUDE (Roll, Pitch, Yaw)
+            # -------------------------------
+            elif msg_type == "ATTITUDE":
+                # Convert from radians to degrees
+                self.roll = math.degrees(msg.roll)
+                self.pitch = math.degrees(msg.pitch)
+                self.yaw = math.degrees(msg.yaw)
 
             # -------------------------------
             # WAYPOINT (Current)
@@ -175,6 +192,26 @@ class Pixhawk:
                 if self.battery_remaining is None and hasattr(msg, "battery_remaining"):
                     self.battery_remaining = msg.battery_remaining
                     self.battery_type = "percent"
+
+    # ---------------------------------------------------------
+    # Attitude Getters (for gimbal)
+    # ---------------------------------------------------------
+    def get_attitude(self):
+        """
+        Get current drone attitude
+        
+        Returns:
+            tuple: (roll, pitch, yaw) in degrees
+        """
+        return (self.roll, self.pitch, self.yaw)
+    
+    def get_roll(self):
+        """Get current roll angle in degrees"""
+        return self.roll
+    
+    def get_pitch(self):
+        """Get current pitch angle in degrees"""
+        return self.pitch
 
     # ---------------------------------------------------------
     # Stability Detection Methods

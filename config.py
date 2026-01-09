@@ -20,8 +20,34 @@ MAIN_LOOP_INTERVAL = 0.1  # seconds
 METRICS_LOG_INTERVAL = 0.5  # seconds
 METRICS_WINDOW_SIZE = 10
 
+# ============================================================================
+# GIMBAL CONFIGURATION
+# ============================================================================
+
+# Enable/Disable Gimbal
+GIMBAL_ENABLED = True  # Set to False to disable gimbal
+
+# GPIO Pins (BCM numbering)
+GIMBAL_ROLL_PIN = 17   # GPIO 17 for roll stabilization servo
+GIMBAL_PITCH_PIN = 27  # GPIO 27 for pitch angle servo
+
+# Gimbal Angles
+GIMBAL_TARGET_PITCH = -45  # Camera pitch angle (negative = downward)
+GIMBAL_MAX_ROLL_COMPENSATION = 30  # Maximum roll compensation (degrees)
+
+# Servo Pulse Width (microseconds)
+GIMBAL_SERVO_MIN_PULSE = 500   # 0.5ms (minimum pulse width)
+GIMBAL_SERVO_MAX_PULSE = 2500  # 2.5ms (maximum pulse width)
+
+# PID Tuning (adjust these based on your servo response)
+GIMBAL_PID_KP = 0.8   # Proportional gain
+GIMBAL_PID_KI = 0.05  # Integral gain
+GIMBAL_PID_KD = 0.1   # Derivative gain
+
+# ============================================================================
+
 # AI Model Configuration
-MODEL_PATH = BASE_DIR / "models" / "pinyasuri_classifier.tflite"
+MODEL_PATH = BASE_DIR / "models" / "pinyasuri_model.tflite"
 MODEL_INPUT_SIZE = (224, 224)
 
 # Class Labels
