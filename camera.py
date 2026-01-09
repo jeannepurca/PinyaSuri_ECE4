@@ -18,6 +18,7 @@ class Camera:
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
         try:
+            from picamera2 import Picamera2
             self.picam2 = Picamera2()
             cam_config = self.picam2.create_still_configuration(main={"size": (4056, 3040)})
             self.picam2.configure(cam_config)
@@ -29,17 +30,22 @@ class Camera:
 
     # Capture Image and Save to File
     def capture(self, waypoint: int, flight_number: int = 1, prefix="img"):
+        # Current date folder
+        date_str = datetime.utcnow().strftime("%Y%m%d")  # YYYYMMDD format
+        date_folder = self.output_dir / date_str
+        date_folder.mkdir(parents=True, exist_ok=True)
+
+        # Timestamp for filename
         ts = datetime.utcnow().strftime("%Y%m%dT%H%M%S%f")[:-3]
         
-        filename = (
-            f"{prefix}_flight{flight_number}_wp{waypoint}_{ts}.jpg"
-        )
+        filename = f"{prefix}_flight{flight_number}_wp{waypoint}_{ts}.jpg"
+        fullpath = date_folder / filename
 
-        fullpath = self.output_dir / filename
+        # Capture the image
         self.picam2.capture_file(str(fullpath))
 
-        logger.info(f"✓ Captured {fullpath}")
-        return str(fullpath)
+        logger.info(f"✓ Captured {filename}")
+        return str(filename)
 
     def close(self):
         try:
