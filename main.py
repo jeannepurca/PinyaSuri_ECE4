@@ -15,7 +15,11 @@ from gimbal import CameraGimbal
 
 running = True
 
-logger = logging.getLogger("PinyaSuri")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+)
+logger = logging.getLogger("Main")
 
 def initialize_csv():
     """Create image log CSV with headers"""
