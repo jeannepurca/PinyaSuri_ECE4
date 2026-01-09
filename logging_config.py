@@ -10,3 +10,4 @@ def setup_logging():
             logging.StreamHandler()
         ]
     )
+    return logging.getLogger("PinyaSuri")
