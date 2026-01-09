@@ -53,8 +53,10 @@ def handle_waypoint_capture(pixhawk, camera, metrics, waypoint, flight_number, c
     if waypoint in captured_wp:
         return False
     
+    wp_name = config.get_waypoint_name(waypoint)
+    
     logger.info("=" * 60)
-    logger.info(f">>> WAYPOINT {waypoint} REACHED - Capturing image...")
+    logger.info(f">>> {wp_name} (WP{waypoint}) REACHED - Capturing image...")
     logger.info("=" * 60)
     
     # Configuration
@@ -120,7 +122,7 @@ def handle_waypoint_capture(pixhawk, camera, metrics, waypoint, flight_number, c
         
         log_image_capture(flight_number, waypoint, pixhawk.position, image_path)
         
-        logger.info(f"✓ CAPTURED WP{waypoint} at {pixhawk.position['rel_alt']:.1f}m altitude")
+        logger.info(f"✓ CAPTURED {wp_name} at {pixhawk.position['rel_alt']:.1f}m altitude")
         logger.info(f"  Image: {image_path}")
         captured_wp.add(waypoint)
         metrics.increment_waypoint()
@@ -198,7 +200,7 @@ def should_capture_image(pixhawk, waypoint, captured_wp, logger):
         logger.debug("⚠ Cannot capture: no position data yet!")
         return False
     
-    # 4. Must be in the air (altitude >= 2.0m)
+    # 4. Must be in the air (altitude >= MIN_ALTITUDE_FOR_CAPTURE)
     if not is_drone_in_air(pixhawk):
         return False
     
@@ -206,9 +208,9 @@ def should_capture_image(pixhawk, waypoint, captured_wp, logger):
     if waypoint in captured_wp:
         return False
     
-    # 6. Only capture at actual mapping waypoints (not takeoff/RTL)
-    valid_capture_waypoints = [2, 3, 4]
-    if waypoint not in valid_capture_waypoints:
+    # 6. Only capture at survey/mapping waypoints (not HOME, TAKEOFF, or RTL)
+    if not config.is_mapping_waypoint(waypoint):
+        logger.debug(f"⚠ {config.get_waypoint_name(waypoint)} is not a mapping waypoint")
         return False
     
     # 7. RELAXED hover detection for outdoor conditions
@@ -226,11 +228,11 @@ def should_capture_image(pixhawk, waypoint, captured_wp, logger):
     # 9. Verify waypoint was actually reached
     # Check if we received the MISSION_ITEM_REACHED event for this waypoint
     if waypoint not in pixhawk.wp_reached_log:
-        logger.debug(f"⚠ WP{waypoint} not confirmed reached yet")
+        logger.debug(f"⚠ {config.get_waypoint_name(waypoint)} not confirmed reached yet")
         return False
     
     # All checks passed!
-    logger.info(f"✓ All capture conditions met for WP{waypoint}!")
+    logger.info(f"✓ All capture conditions met for {config.get_waypoint_name(waypoint)}!")
     return True
 
 def main_loop(pixhawk, camera, metrics, gimbal, logger):

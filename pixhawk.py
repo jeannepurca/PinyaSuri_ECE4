@@ -154,9 +154,16 @@ class Pixhawk:
                 if self.mode == "AUTO" and 1 <= msg.seq < 255:
                     wp_num = msg.seq + 1
                     
-                    if wp_num not in self.wp_reached_log:
-                        self.wp_reached_log.add(wp_num)
-                        logger.info(f"✓ WAYPOINT {wp_num} REACHED, CONFIRMED!")
+                    # Only log waypoint as reached if drone is actually in the air
+                    if self.position and self.position["rel_alt"] >= config.MIN_ALTITUDE_FOR_CAPTURE:
+                        if wp_num not in self.wp_reached_log:
+                            self.wp_reached_log.add(wp_num)
+                            wp_name = config.get_waypoint_name(wp_num)
+                            logger.info(f"✓ {wp_name} (WP{wp_num}) REACHED, CONFIRMED!")
+                    else:
+                        wp_name = config.get_waypoint_name(wp_num)
+                        alt_str = f"{self.position['rel_alt']:.1f}m" if self.position else "N/A"
+                        logger.debug(f"⚠ Ignoring {wp_name} (WP{wp_num}) REACHED - drone not airborne (alt: {alt_str})")
 
             # -------------------------------
             # HEARTBEAT (MODE + ARM)

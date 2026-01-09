@@ -12,6 +12,72 @@ TEST_IMAGE_DIR = IMAGE_DIR / "test"
 # Pixhawk Connection
 PIXHAWK_ADDRESS = "/dev/ttyAMA0"
 
+# ============================================================================
+# MISSION WAYPOINT DEFINITIONS
+# ============================================================================
+
+# System waypoints (never capture images here)
+WP_HOME = 0
+WP_TAKEOFF = 1
+
+# Survey/Mapping waypoint range
+# Adjust MAPPING_WP_END based on your mission plan
+# This supports missions with varying numbers of survey points
+MAPPING_WP_START = 2
+MAPPING_WP_END = 20  # Supports missions with up to 19 survey points
+
+def is_mapping_waypoint(wp_number):
+    """
+    Check if waypoint is a survey/mapping point for image capture
+    
+    Args:
+        wp_number: Waypoint sequence number
+    
+    Returns:
+        True if waypoint is between MAPPING_WP_START and MAPPING_WP_END
+    """
+    return MAPPING_WP_START <= wp_number <= MAPPING_WP_END
+
+def get_waypoint_name(wp_number):
+    """
+    Get human-readable waypoint name
+    
+    Args:
+        wp_number: Waypoint sequence number
+    
+    Returns:
+        Descriptive name string
+    """
+    if wp_number == WP_HOME:
+        return "HOME"
+    elif wp_number == WP_TAKEOFF:
+        return "TAKEOFF"
+    elif is_mapping_waypoint(wp_number):
+        return f"WAYPOINT_{wp_number}"
+    else:
+        return "RETURN_TO_LAUNCH"
+
+def get_waypoint_type(wp_number):
+    """
+    Get waypoint type for logging/filtering
+    
+    Args:
+        wp_number: Waypoint sequence number
+    
+    Returns:
+        Waypoint type: "home", "takeoff", "survey", or "rtl"
+    """
+    if wp_number == WP_HOME:
+        return "home"
+    elif wp_number == WP_TAKEOFF:
+        return "takeoff"
+    elif is_mapping_waypoint(wp_number):
+        return "survey"
+    else:
+        return "rtl"
+
+# ============================================================================
+
 # Flight Capture Settings
 MIN_ALTITUDE_FOR_CAPTURE = 2.0
 
