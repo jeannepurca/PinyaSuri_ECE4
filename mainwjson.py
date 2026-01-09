@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# main.py - Integrated with gimbal stabilization
+# main.py - Updated with proper JSON handling and upload
 
 import time
 import csv
@@ -12,6 +12,13 @@ from pixhawk import Pixhawk
 from gimbal import CameraGimbal
 from camera import Camera
 from metrics import FlightMetrics
+from data_uploader import (
+    save_json, 
+    queue_image_upload,
+    start_upload_queue,
+    stop_upload_queue,
+    scan_and_queue_unuploaded_files
+)
 
 running = True
 
@@ -48,13 +55,11 @@ def handle_waypoint_capture(pixhawk, camera, metrics, waypoint, flight_number, c
     logger.info("=" * 60)
     
     # Configuration
-    max_wait_time = 6.0  # Max wait (Mission Planner handles the 10s hover)
-    check_interval = 0.4  # Check every 0.4 seconds
-    stable_checks_needed = 2  # Need 2 consecutive stable readings
-    
-    # Relaxed thresholds for outdoor conditions
-    speed_threshold = 0.6  # m/s (forgiving for wind)
-    altitude_threshold = 0.8  # m (forgiving for air turbulence)
+    max_wait_time = 6.0
+    check_interval = 0.4
+    stable_checks_needed = 2
+    speed_threshold = 0.6
+    altitude_threshold = 0.8
     
     logger.info(">>> Waiting for drone to stabilize...")
     
@@ -65,10 +70,8 @@ def handle_waypoint_capture(pixhawk, camera, metrics, waypoint, flight_number, c
         time.sleep(check_interval)
         elapsed += check_interval
         
-        # Update telemetry
         pixhawk.update()
         
-        # Check if drone is stable
         is_hovering = pixhawk.is_hovering(threshold=speed_threshold)
         is_alt_stable = pixhawk.is_altitude_stable(
             threshold=altitude_threshold, 
@@ -85,13 +88,11 @@ def handle_waypoint_capture(pixhawk, camera, metrics, waypoint, flight_number, c
                 logger.info(f"✓ Drone stabilized after {elapsed:.1f}s - Capturing now!")
                 break
         else:
-            # Reset counter if drone becomes unstable
             if stable_count > 0:
                 logger.debug(f"  ○ Lost stability - rechecking... "
                            f"(speed: {pixhawk.groundspeed:.2f} m/s)")
             stable_count = 0
     
-    # Check if we achieved stability
     if stable_count < stable_checks_needed:
         logger.warning(f"⚠ Could not achieve stable hover after {elapsed:.1f}s")
         logger.warning(f"  Current speed: {pixhawk.groundspeed:.2f} m/s")
@@ -100,19 +101,34 @@ def handle_waypoint_capture(pixhawk, camera, metrics, waypoint, flight_number, c
         logger.warning("  Skipping capture this attempt")
         return False
     
-    # Capture image immediately after stability confirmed
+    # Capture image
     try:
         image_path = camera.capture(
             waypoint=waypoint,
             flight_number=flight_number,
             prefix="pinyasuri"
         )
+        
+        # Save JSON locally and queue for upload
+        json_path = save_json(
+            flight_number=flight_number,
+            waypoint=waypoint,
+            image_path=image_path,
+            class_name="",  # Will be filled by AI classification later
+            prediction=""
+        )
+        
+        # Queue image for upload
+        full_image_path = config.IMAGE_DIR / image_path
+        queue_image_upload(full_image_path)
 
-        # Log CSV
+        # Log to CSV
         log_image_capture(flight_number, waypoint, pixhawk.position, image_path)
         
         logger.info(f"✓ CAPTURED {wp_name} at {pixhawk.position['rel_alt']:.1f}m altitude")
         logger.info(f"  Image: {image_path}")
+        logger.info(f"  JSON: {json_path.name if json_path else 'FAILED'}")
+        
         captured_wp.add(waypoint)
         metrics.increment_waypoint()
         
@@ -138,28 +154,24 @@ def get_telemetry_dict(pixhawk):
 def handle_arm_state_change(pixhawk, metrics, gimbal, was_armed, flight_number, captured_wp, logger):
     """Detect and handle arm/disarm transitions"""
     if pixhawk.armed and not was_armed:
-        # Just armed
         logger.info("=" * 60)
         logger.info(f"🛫 FLIGHT #{flight_number} - DRONE ARMED")
-        logger.info("   Mission monitoring started.  ")
+        logger.info("   Mission monitoring started.")
         logger.info("=" * 60)
         metrics.start_flight(True, pixhawk.battery_remaining)
-        pixhawk.clear_waypoint_log()  # Clear old waypoint logs
+        pixhawk.clear_waypoint_log()
         
-        # Enable gimbal stabilization
         if gimbal:
             gimbal.enable()
         
         return True, flight_number
         
     elif not pixhawk.armed and was_armed:
-        # Just disarmed
         logger.info(f"🛬 FLIGHT #{flight_number} - DRONE DISARMED")
         metrics.end_flight(True)
         captured_wp.clear()
         pixhawk.clear_waypoint_log()
         
-        # Disable gimbal and center servos
         if gimbal:
             gimbal.disable()
         
@@ -170,57 +182,43 @@ def handle_arm_state_change(pixhawk, metrics, gimbal, was_armed, flight_number, 
 def is_drone_in_air(pixhawk):
     if not pixhawk.position:
         return False
-    
     return pixhawk.position["rel_alt"] >= config.MIN_ALTITUDE_FOR_CAPTURE
 
 def should_capture_image(pixhawk, waypoint, captured_wp, logger):
     """Check if conditions are met for image capture"""
-
-    # 1. Drone must be armed
+    
     if not pixhawk.armed:
         return False
     
-    # 2. Must have valid waypoint
     if not waypoint:
         return False
     
-    # 3. Must have position data from GPS
     if not pixhawk.position:
         logger.debug("⚠ Cannot capture: no position data yet!")
         return False
     
-    # 4. Must be in the air (altitude >= MIN_ALTITUDE_FOR_CAPTURE)
     if not is_drone_in_air(pixhawk):
         return False
     
-    # 5. Must NOT have already captured this waypoint
     if waypoint in captured_wp:
         return False
     
-    # 6. Only capture at survey/mapping waypoints (not HOME, TAKEOFF, or RTL)
     if not config.is_mapping_waypoint(waypoint):
         logger.debug(f"⚠ {config.get_waypoint_name(waypoint)} is not a mapping waypoint")
         return False
     
-    # 7. RELAXED hover detection for outdoor conditions
-    # Mission Planner holds for 10s, so we can be more forgiving
-    if not pixhawk.is_hovering(threshold=0.6):  # Relaxed for wind
+    if not pixhawk.is_hovering(threshold=0.6):
         logger.debug(f"⚠ Still moving at {pixhawk.groundspeed:.2f} m/s")
         return False
     
-    # 8. RELAXED altitude stability check
-    # More forgiving since Mission Planner handles the hover
-    if not pixhawk.is_altitude_stable(threshold=0.8, window_size=5):  # Very forgiving
+    if not pixhawk.is_altitude_stable(threshold=0.8, window_size=5):
         logger.debug(f"⚠ Altitude not stable: {pixhawk.get_altitude_variation():.2f} m variation")
         return False
     
-    # 9. Verify waypoint was actually reached
-    # Check if we received the MISSION_ITEM_REACHED event for this waypoint
     if waypoint not in pixhawk.wp_reached_log:
         logger.debug(f"⚠ {config.get_waypoint_name(waypoint)} not confirmed reached yet")
         return False
     
-    # All checks passed!
     logger.info(f"✓ All capture conditions met for {config.get_waypoint_name(waypoint)}!")
     return True
 
@@ -238,35 +236,26 @@ def main_loop(pixhawk, camera, metrics, gimbal, logger):
     logger.info("=" * 60)
 
     while running:
-        # Update pixhawk telemetry
         pixhawk.update()
         
-        # Update gimbal stabilization (if enabled)
         if gimbal and gimbal.enabled:
-            # Get current drone attitude
             drone_roll = pixhawk.get_roll()
             drone_pitch = pixhawk.get_pitch()
-            
-            # Update gimbal to compensate for roll
             gimbal.update(drone_roll, drone_pitch)
         
-        # Handle arm/disarm state changes
         was_armed, flight_number = handle_arm_state_change(
             pixhawk, metrics, gimbal, was_armed, flight_number, captured_wp, logger
         )
 
-        # Check for flight mode changes
         if pixhawk.mode != current_mode:
             current_mode = pixhawk.mode
             logger.info(f"> Flight Mode: {current_mode}")
 
-        # Update metrics during flight
         if pixhawk.armed:
             telemetry = get_telemetry_dict(pixhawk)
             if telemetry:
                 metrics.update(telemetry)
         
-        # Check for image capture
         if should_capture_image(pixhawk, pixhawk.last_wp, captured_wp, logger):
             handle_waypoint_capture(
                 pixhawk, camera, metrics, 
@@ -287,15 +276,21 @@ def cleanup(camera, metrics, gimbal, was_armed, logger):
     if was_armed:
         logger.info(">>> Finalizing flight metrics...")
         metrics.end_flight(True)
+    
+    # Upload all mission data to server
+    try:
+        logger.info(">>> Uploading mission data to server...")
+        stop_upload_queue()  # This will finish all queued uploads and print stats
+        logger.info("✓ Mission data upload complete")
+    except Exception as e:
+        logger.warning(f"⚠ Mission upload failed: {e}")
 
-    # Cleanup gimbal
     if gimbal:
         try:
             gimbal.cleanup()
         except Exception as e:
             logger.warning(f"⚠ Error cleaning up gimbal: {e}")
 
-    # Cleanup camera
     try:
         camera.close()
     except Exception as e:
@@ -306,22 +301,19 @@ def cleanup(camera, metrics, gimbal, was_armed, logger):
 def main():
     global running
     
-    # Setup
     logger = setup_logging()
     
-    # Initialize components
     pixhawk = Pixhawk()
     camera = Camera()
     metrics = FlightMetrics()
     
-    # Initialize gimbal (optional - set to None to disable)
     gimbal = None
     try:
         gimbal = CameraGimbal(
-            roll_pin=config.GIMBAL_ROLL_PIN,
-            pitch_pin=config.GIMBAL_PITCH_PIN,
-            target_pitch=config.GIMBAL_TARGET_PITCH,
-            max_roll_compensation=config.GIMBAL_MAX_ROLL_COMPENSATION,
+            roll_pin=17,
+            pitch_pin=27,
+            target_pitch=-45,
+            max_roll_compensation=30,
             use_mpu6050=config.USE_MPU6050,
             mpu6050_address=config.MPU6050_I2C_ADDRESS
         )
@@ -334,12 +326,17 @@ def main():
     logger.info("🍍 PINYASURI FLIGHT SYSTEM 🚁")
     logger.info("=" * 60)
     
-    # Wait for connection
     try:
         pixhawk.wait_for_connection()
         initialize_csv()
         
-        # Run main loop
+        # Start upload queue worker
+        logger.info(">>> Starting upload queue...")
+        start_upload_queue()
+        
+        # Queue any unuploaded files from previous sessions
+        scan_and_queue_unuploaded_files()
+        
         was_armed = main_loop(pixhawk, camera, metrics, gimbal, logger)
         
     except KeyboardInterrupt:
@@ -348,7 +345,6 @@ def main():
         logger.info("⚠ MANUAL STOP - Interrupted by user! ⚠")
         logger.info("=" * 60)
         running = False
-
         time.sleep(0.5)
         was_armed = pixhawk.armed if pixhawk else False
     except Exception as e:

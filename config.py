@@ -14,6 +14,7 @@ BASE_DIR = Path(__file__).resolve().parent
 LOG_DIR = BASE_DIR / "logs"
 IMAGE_DIR = BASE_DIR / "images"
 MODEL_DIR = BASE_DIR / "models"
+JSON_DIR = BASE_DIR / "results"
 
 def get_flight_log_dir():
     date_str = datetime.now().strftime("%Y-%m-%d")
@@ -34,6 +35,7 @@ def ensure_directories():
     LOG_DIR.mkdir(exist_ok=True)
     IMAGE_DIR.mkdir(exist_ok=True)
     MODEL_DIR.mkdir(exist_ok=True)
+    JSON_DIR.mkdir( exist_ok=True)
 
 
 # ============================================================================
@@ -134,6 +136,9 @@ GIMBAL_PID_KD = 0.1   # Derivative gain
 # ============================================================================
 # AI CONFIGURATION
 # ============================================================================
+
+# --- Server Configuration for JSON Uploads
+SERVER = "http://WEB_SERVER_IP:5000"
 
 # --- AI Model Configuration
 MODEL_PATH = MODEL_DIR / "models" / "pinyasuri_model.tflite"
