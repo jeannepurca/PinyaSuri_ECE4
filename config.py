@@ -120,7 +120,7 @@ GIMBAL_ROLL_PIN = 17   # GPIO 17 for roll stabilization servo
 GIMBAL_PITCH_PIN = 27  # GPIO 27 for pitch angle servo
 
 # --- Gimbal Angles
-GIMBAL_PITCH_FIXED_POSITION = -0.8
+GIMBAL_PITCH_FIXED_POSITION = 0.0
 
 # --- Servo Pulse Width (microseconds)
 GIMBAL_SERVO_MIN_PULSE = 500   # 0.5ms (minimum pulse width)
