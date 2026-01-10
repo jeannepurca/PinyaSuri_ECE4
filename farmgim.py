@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
-# farmvidgim.py
+# farm.py
 
 import time
 import threading
 from picamera2 import Picamera2
-from picamera2.encoders import H264Encoder
-from picamera2.outputs import FfmpegOutput
 from libcamera import controls
 from datetime import datetime
 from pathlib import Path
@@ -18,9 +16,10 @@ except ImportError:
     GIMBAL_AVAILABLE = False
     print("Warning: gimbal.py not found. Running without stabilization.")
 
+# Base Directories
 BASE_DIR = Path(__file__).resolve().parent
-VIDEO_DIR = BASE_DIR / "videos"
-FARM_VIDEO_DIR = VIDEO_DIR / "farms"
+IMAGE_DIR = BASE_DIR / "images"
+FARM_IMAGE_DIR = IMAGE_DIR / "farms"
 
 # Gimbal Configuration
 GIMBAL_ROLL_PIN = 17
@@ -28,9 +27,12 @@ GIMBAL_PITCH_PIN = 27
 GIMBAL_TARGET_PITCH = -45.0  # 45 degrees downward
 USE_GIMBAL = True  # Set to False to disable gimbal
 
+
 def ensure_directories():
-    VIDEO_DIR.mkdir(exist_ok=True)
-    FARM_VIDEO_DIR.mkdir(exist_ok=True)
+    """Create all necessary directories"""
+    IMAGE_DIR.mkdir(exist_ok=True)
+    FARM_IMAGE_DIR.mkdir(exist_ok=True)
+
 
 def gimbal_update_thread(gimbal, stop_event):
     """Background thread to continuously update gimbal"""
@@ -42,15 +44,18 @@ def gimbal_update_thread(gimbal, stop_event):
             print(f"Gimbal update error: {e}")
             break
 
-def record_video():
+
+def capture_image():
     ensure_directories()
 
+    # Ask user for farm name
     farm_name = input("Enter the farm name: ").strip()
     if not farm_name:
-        print("Invalid farm name.")
+        print("Invalid farm name. Exiting...")
         return
 
-    farm_dir = FARM_VIDEO_DIR / farm_name
+    # Create a folder for this farm
+    farm_dir = FARM_IMAGE_DIR / farm_name
     farm_dir.mkdir(exist_ok=True)
 
     # Initialize gimbal
@@ -60,6 +65,7 @@ def record_video():
     
     if USE_GIMBAL and GIMBAL_AVAILABLE:
         try:
+            print("Initializing gimbal...")
             gimbal = CameraGimbal(
                 roll_pin=GIMBAL_ROLL_PIN,
                 pitch_pin=GIMBAL_PITCH_PIN,
@@ -84,16 +90,16 @@ def record_video():
             gimbal = None
 
     # Initialize camera
+    print("Initializing camera...")
     picam2 = Picamera2()
 
-    video_config = picam2.create_video_configuration(
-        main={"size": (1920, 1080)},
-        controls={"FrameRate": 50}
-    )
-    picam2.configure(video_config)
+    # Configure for maximum still resolution
+    still_config = picam2.create_still_configuration()
+    picam2.configure(still_config)
+
     picam2.start()
 
-    # Continuous AF (Camera Module v3)
+    # Enable Continuous Autofocus (Camera Module v3)
     try:
         picam2.set_controls({
             "AfMode": controls.AfModeEnum.Continuous
@@ -102,54 +108,49 @@ def record_video():
     except Exception as e:
         print(f"Autofocus not available: {e}")
 
+    # Allow sensor + AF to settle
     time.sleep(2)
 
-    encoder = H264Encoder(bitrate=10_000_000)
-    recording = False
-    video_count = 0
+    # Display camera info
+    camera_props = picam2.camera_properties
+    print(f"Camera model: {camera_props.get('Model', 'Unknown')}")
+    print(f"Resolution: {still_config['main']['size']}")
+    print("Camera ready!")
 
-    print("\n" + "=" * 60)
-    print("VIDEO RECORD MODE (MP4)")
-    if gimbal:
-        print("🎥 Gimbal: ACTIVE - Camera stabilized at 45° downward")
-    print("=" * 60)
-    print("Press ENTER to start/stop recording")
-    print("Type 'q' to quit")
-    print("=" * 60 + "\n")
+    image_count = 0
 
     try:
+        print("\n" + "=" * 60)
+        print("CAPTURE MODE ACTIVE")
+        if gimbal:
+            print("🎥 Gimbal: ACTIVE - Camera stabilized at 45° downward")
+        print("=" * 60)
+        print("Press ENTER to capture an image")
+        print("Type 'q' or 'quit' to exit")
+        print("=" * 60 + "\n")
+
         while True:
-            user_input = input("Ready: ").strip().lower()
+            user_input = input("Ready to capture (or 'q' to quit): ").strip().lower()
 
             if user_input in ("q", "quit", "exit"):
-                if recording:
-                    picam2.stop_recording()
+                print("\nExiting capture mode...")
                 break
 
-            if not recording:
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = farm_dir / f"{timestamp}.mp4"
+            # Give AF a brief moment before capture
+            time.sleep(0.3)
 
-                output = FfmpegOutput(str(filename))
-                picam2.start_recording(encoder, output)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = farm_dir / f"{timestamp}.jpg"
 
-                recording = True
-                video_count += 1
-                print(f"● Recording started: {filename.name}")
+            picam2.capture_file(str(filename))
+            image_count += 1
 
-            else:
-                picam2.stop_recording()
-                recording = False
-                print("■ Recording stopped")
+            print(f"✓ Image #{image_count} saved: {filename.name}")
 
     except KeyboardInterrupt:
         print("\n\nInterrupted by user (Ctrl+C)")
 
     finally:
-        # Stop recording if active
-        if recording:
-            picam2.stop_recording()
-        
         # Stop camera
         picam2.stop()
         
@@ -160,10 +161,11 @@ def record_video():
             if gimbal_thread:
                 gimbal_thread.join(timeout=1.0)
             gimbal.cleanup()
+        
+        print(f"\nTotal images captured: {image_count}")
+        print(f"Images saved in: {farm_dir}")
+        print("Camera and gimbal stopped. Goodbye!")
 
-        print(f"\nTotal videos recorded: {video_count}")
-        print(f"Saved in: {farm_dir}")
-        print("Camera and gimbal stopped.")
 
 if __name__ == "__main__":
-    record_video()
+    capture_image()
