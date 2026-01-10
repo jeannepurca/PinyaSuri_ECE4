@@ -320,8 +320,6 @@ def main():
         gimbal = CameraGimbal(
             roll_pin=config.GIMBAL_ROLL_PIN,
             pitch_pin=config.GIMBAL_PITCH_PIN,
-            target_pitch=config.GIMBAL_TARGET_PITCH,
-            max_roll_compensation=config.GIMBAL_MAX_ROLL_COMPENSATION,
             use_mpu6050=config.USE_MPU6050,
             mpu6050_address=config.MPU6050_I2C_ADDRESS
         )

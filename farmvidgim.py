@@ -63,7 +63,6 @@ def record_video():
             gimbal = CameraGimbal(
                 roll_pin=GIMBAL_ROLL_PIN,
                 pitch_pin=GIMBAL_PITCH_PIN,
-                target_pitch=GIMBAL_TARGET_PITCH,
                 use_mpu6050=True
             )
             gimbal.enable()

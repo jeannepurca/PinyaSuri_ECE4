@@ -3,94 +3,84 @@
 
 import time
 import math
+import logging
 from gpiozero import Servo
 from mpu6050 import mpu6050
 
+import config
+
+logger = logging.getLogger(__name__)
+
 class CameraGimbal:
-    """2-axis gimbal - Roll stabilization + Fixed 45° pitch"""
+    """
+    Camera gimbal with roll stabilization and fixed pitch angle.
+    Uses complementary filter + PID control for smooth stabilization.
+    """
     
-    def __init__(self, roll_pin=17, pitch_pin=27, target_pitch=-45.0, 
-                 max_roll_compensation=20.0, use_mpu6050=True, mpu6050_address=0x68):
+    def __init__(self, roll_pin, pitch_pin, use_mpu6050=True, mpu6050_address=0x68):
+        """
+        Initialize gimbal servos and IMU
         
-        # Configuration
-        self.target_pitch = target_pitch  # -45° downward (FIXED position)
-        self.max_roll = max_roll_compensation
+        Args:
+            roll_pin: GPIO pin for roll servo
+            pitch_pin: GPIO pin for pitch servo
+            use_mpu6050: Use MPU6050 IMU for stabilization
+            mpu6050_address: I2C address of MPU6050
+        """
         self.use_mpu6050 = use_mpu6050
+        self.enabled = False
         
-        # PID gains (same as testgim.py)
-        self.kp = 0.6
-        self.ki = 0.05
-        self.kd = 0.03
-        
-        # Complementary filter
-        self.alpha = 0.98
+        # Convert pulse widths from microseconds to seconds
+        servo_min = config.GIMBAL_SERVO_MIN_PULSE / 1_000_000
+        servo_max = config.GIMBAL_SERVO_MAX_PULSE / 1_000_000
         
         # Initialize servos
-        servo_min = 0.0005
-        servo_max = 0.0025
-        self.roll_servo = Servo(roll_pin, min_pulse_width=servo_min, max_pulse_width=servo_max)
-        self.pitch_servo = Servo(pitch_pin, min_pulse_width=servo_min, max_pulse_width=servo_max)
+        self.roll_servo = Servo(
+            roll_pin, 
+            min_pulse_width=servo_min, 
+            max_pulse_width=servo_max
+        )
+        self.pitch_servo = Servo(
+            pitch_pin,
+            min_pulse_width=servo_min,
+            max_pulse_width=servo_max
+        )
         
-        # Calculate fixed pitch servo position for 45° downward
-        # Adjust this value based on your servo's physical range
-        # Negative value = downward tilt
-        self.pitch_servo_fixed_position = -0.8  # Adjust between -1.0 to 0.0 for 45° down
+        # Set pitch to fixed 45° downward position
+        self.pitch_servo.value = config.GIMBAL_PITCH_FIXED_POSITION
+        logger.info(f"Pitch servo set to fixed position: {config.GIMBAL_PITCH_FIXED_POSITION}")
         
-        # Initialize IMU if enabled
+        # Initialize MPU6050 if enabled
         self.imu = None
         if self.use_mpu6050:
             try:
                 self.imu = mpu6050(mpu6050_address)
+                logger.info(f"MPU6050 initialized at address 0x{mpu6050_address:02X}")
             except Exception as e:
-                print(f"Warning: Could not initialize MPU6050: {e}")
+                logger.warning(f"MPU6050 initialization failed: {e}")
                 self.use_mpu6050 = False
         
-        # State variables
-        self.enabled = False
+        # PID state for roll only
+        self.roll_integral = 0
+        self.roll_prev_error = 0
+        
+        # Complementary filter state
         self.roll_angle = 0.0
-        self.pitch_angle = 0.0
         self.last_time = time.time()
         
-        # PID state (only for roll)
-        self.roll_integral = 0
-        self.roll_prev_error = 0
+        # Maximum roll correction angle (degrees)
+        self.max_roll_angle = 20.0
         
-        # Center servos initially
-        self.roll_servo.value = 0
-        self.pitch_servo.value = 0
-    
-    def enable(self):
-        """Enable gimbal stabilization"""
-        self.enabled = True
-        self.reset_pid()
-        
-        # Set pitch to fixed 45° downward position
-        self.pitch_servo.value = self.pitch_servo_fixed_position
-        
-        print(f"Gimbal enabled - Pitch FIXED at {abs(self.target_pitch)}° down, Roll stabilization ACTIVE")
-    
-    def disable(self):
-        """Disable gimbal and center servos"""
-        self.enabled = False
-        self.roll_servo.value = 0
-        self.pitch_servo.value = 0
-        self.reset_pid()
-        print("Gimbal disabled and centered")
-    
-    def reset_pid(self):
-        """Reset PID integrators"""
-        self.roll_integral = 0
-        self.roll_prev_error = 0
+        logger.info("Gimbal initialized - Roll stabilization ACTIVE, Pitch FIXED at 45°")
     
     def _clamp(self, value, min_val, max_val):
         """Clamp value between min and max"""
         return max(min(value, max_val), min_val)
     
-    def _accel_to_angles(self, accel):
-        """Convert accelerometer data to roll/pitch angles"""
+    def _accel_to_roll(self, accel):
+        """Calculate roll angle from accelerometer data"""
         roll = math.degrees(math.atan2(accel["y"], accel["z"]))
-        pitch = math.degrees(math.atan2(-accel["x"], math.sqrt(accel["y"]**2 + accel["z"]**2)))
-        return roll, pitch
+        return roll
     
     def _angle_to_servo(self, angle, max_angle):
         """Convert angle to servo value [-1, +1]"""
@@ -100,133 +90,145 @@ class CameraGimbal:
     def update(self, drone_roll=None, drone_pitch=None):
         """
         Update gimbal stabilization
-        - Roll: Active PID stabilization (EXACTLY like testgim.py)
-        - Pitch: Fixed at 45° downward (no movement)
         
         Args:
-            drone_roll: Current drone roll angle (optional, uses IMU if not provided)
-            drone_pitch: Current drone pitch angle (optional, uses IMU if not provided)
+            drone_roll: Drone's roll angle (degrees) - used if MPU6050 unavailable
+            drone_pitch: Drone's pitch angle (degrees) - ignored (pitch is fixed)
         """
         if not self.enabled:
             return
         
+        # Calculate delta time
         current_time = time.time()
         dt = current_time - self.last_time
         self.last_time = current_time
         
-        # Get current angles (from IMU or drone telemetry)
-        if self.use_mpu6050 and self.imu and (drone_roll is None or drone_pitch is None):
-            # Use IMU data
+        if dt <= 0:
+            return
+        
+        # Get roll angle from MPU6050 or fallback to drone telemetry
+        if self.use_mpu6050 and self.imu:
             try:
+                # Read IMU data
                 accel = self.imu.get_accel_data()
-                gyro = self.imu.get_gyro_data()
-                accel_roll, accel_pitch = self._accel_to_angles(accel)
+                gyro = self.imu.get_gyro_data()  # degrees/sec
                 
-                # Complementary filter (EXACTLY like testgim.py)
-                self.roll_angle = self.alpha * (self.roll_angle + gyro["x"] * dt) + (1 - self.alpha) * accel_roll
-                self.pitch_angle = self.alpha * (self.pitch_angle + gyro["y"] * dt) + (1 - self.alpha) * accel_pitch
+                # Calculate roll from accelerometer
+                accel_roll = self._accel_to_roll(accel)
+                
+                # Complementary filter
+                self.roll_angle = (
+                    config.MPU6050_ALPHA * (self.roll_angle + gyro["x"] * dt) + 
+                    (1 - config.MPU6050_ALPHA) * accel_roll
+                )
+                
             except Exception as e:
-                print(f"IMU read error: {e}")
-                return
+                logger.debug(f"IMU read error: {e}")
+                # Fallback to drone telemetry
+                if drone_roll is not None:
+                    self.roll_angle = drone_roll
         else:
-            # Use drone telemetry data
+            # Use drone telemetry
             if drone_roll is not None:
                 self.roll_angle = drone_roll
-            if drone_pitch is not None:
-                self.pitch_angle = drone_pitch
         
-        # --- PID correction for Roll ONLY (EXACTLY like testgim.py) ---
-        roll_error = -self.roll_angle
+        # PID control for roll stabilization
+        roll_error = -self.roll_angle  # Negative to oppose the tilt
         self.roll_integral += roll_error * dt
-        roll_derivative = (roll_error - self.roll_prev_error) / dt if dt > 0 else 0
+        roll_derivative = (roll_error - self.roll_prev_error) / dt
         self.roll_prev_error = roll_error
-        roll_output = self.kp * roll_error + self.ki * self.roll_integral + self.kd * roll_derivative
-        self.roll_servo.value = self._angle_to_servo(roll_output, self.max_roll)
         
-        # --- Pitch: Keep FIXED at 45° downward (NO MOVEMENT) ---
-        # Pitch servo doesn't move - it stays at the fixed position set during enable()
-        # self.pitch_servo.value remains at self.pitch_servo_fixed_position
+        # Calculate PID output
+        roll_output = (
+            config.GIMBAL_PID_KP * roll_error + 
+            config.GIMBAL_PID_KI * self.roll_integral + 
+            config.GIMBAL_PID_KD * roll_derivative
+        )
+        
+        # Apply to servo
+        self.roll_servo.value = self._angle_to_servo(roll_output, self.max_roll_angle)
     
-    def set_pitch_angle(self, servo_value):
-        """
-        Manually adjust the fixed pitch servo position
-        servo_value: -1.0 to 0.0 (negative = downward)
-        """
-        self.pitch_servo_fixed_position = self._clamp(servo_value, -1.0, 0.0)
-        if self.enabled:
-            self.pitch_servo.value = self.pitch_servo_fixed_position
-        print(f"Pitch servo fixed position set to: {self.pitch_servo_fixed_position:.2f}")
+    def enable(self):
+        """Enable gimbal stabilization"""
+        self.enabled = True
+        self.roll_integral = 0
+        self.roll_prev_error = 0
+        self.last_time = time.time()
+        logger.info("Gimbal stabilization ENABLED")
+    
+    def disable(self):
+        """Disable gimbal stabilization and center servos"""
+        self.enabled = False
+        self.roll_servo.value = 0  # Center roll
+        self.pitch_servo.value = config.GIMBAL_PITCH_FIXED_POSITION  # Keep pitch fixed
+        logger.info("Gimbal stabilization DISABLED - servos centered")
     
     def cleanup(self):
         """Clean up resources"""
         self.disable()
         self.roll_servo.close()
         self.pitch_servo.close()
-        print("Gimbal cleanup complete")
+        logger.info("Gimbal cleanup complete")
 
 
-# Standalone test mode
-if __name__ == "__main__":
+# ============================================================================
+# STANDALONE TEST MODE
+# ============================================================================
+
+def test_gimbal():
+    """
+    Standalone test mode for gimbal stabilization.
+    Runs independently without drone connection.
+    """
     print("=" * 60)
-    print("GIMBAL TEST - Roll Stabilization + Fixed 45° Pitch")
+    print("🎥 GIMBAL STANDALONE TEST MODE")
     print("=" * 60)
-    print("Pitch servo: FIXED at 45° downward (no movement)")
-    print("Roll servo: Active stabilization (moves opposite to tilt)")
+    print("Initializing gimbal system...")
+    
+    # Initialize gimbal
+    gimbal = CameraGimbal(
+        roll_pin=config.GIMBAL_ROLL_PIN,
+        pitch_pin=config.GIMBAL_PITCH_PIN,
+        use_mpu6050=config.USE_MPU6050,
+        mpu6050_address=config.MPU6050_I2C_ADDRESS
+    )
+    
+    print(f"✓ Roll servo on GPIO {config.GIMBAL_ROLL_PIN}")
+    print(f"✓ Pitch servo on GPIO {config.GIMBAL_PITCH_PIN} (FIXED at 45°)")
+    print(f"✓ MPU6050 at 0x{config.MPU6050_I2C_ADDRESS:02X}")
+    print(f"✓ Update rate: 50 Hz")
+    print(f"✓ PID gains: Kp={config.GIMBAL_PID_KP}, Ki={config.GIMBAL_PID_KI}, Kd={config.GIMBAL_PID_KD}")
     print("=" * 60)
-    print("\nCalibration mode: Find the right pitch servo value")
-    print("Commands:")
-    print("  Press ENTER to see current status")
-    print("  Type servo value (-1.0 to 0.0) to adjust pitch angle")
-    print("  Example: -0.5, -0.7, -0.9 (more negative = more downward)")
-    print("  Type 'q' to start normal operation")
+    print("Gimbal stabilization starting... Tilt the IMU!")
+    print("Press Ctrl+C to stop")
     print("=" * 60)
     
-    gimbal = CameraGimbal(use_mpu6050=True)
-    
-    # Calibration loop
-    try:
-        while True:
-            user_input = input("\nEnter pitch value or 'q' to start: ").strip().lower()
-            
-            if user_input == 'q':
-                break
-            elif user_input == '':
-                print(f"Current pitch servo position: {gimbal.pitch_servo_fixed_position:.2f}")
-                print("Adjust until camera points exactly 45° downward when level")
-            else:
-                try:
-                    value = float(user_input)
-                    gimbal.pitch_servo.value = gimbal._clamp(value, -1.0, 0.0)
-                    gimbal.pitch_servo_fixed_position = gimbal._clamp(value, -1.0, 0.0)
-                    print(f"Pitch servo set to: {gimbal.pitch_servo_fixed_position:.2f}")
-                except ValueError:
-                    print("Invalid input. Use number between -1.0 and 0.0")
-    
-    except KeyboardInterrupt:
-        print("\nExiting calibration...")
-        gimbal.cleanup()
-        exit()
-    
-    # Normal operation
-    print("\n" + "=" * 60)
-    print("Starting normal operation...")
-    print(f"Pitch: FIXED at {gimbal.pitch_servo_fixed_position:.2f}")
-    print("Roll: Active stabilization")
-    print("Press Ctrl+C to exit")
-    print("=" * 60 + "\n")
-    
+    # Enable stabilization
     gimbal.enable()
     
     try:
         while True:
+            # Update gimbal (no drone data in test mode, uses only IMU)
             gimbal.update()
-            print(f"Roll: {gimbal.roll_angle:6.1f}° → servo: {gimbal.roll_servo.value:+.2f} | "
-                  f"Pitch: FIXED at {gimbal.pitch_servo_fixed_position:+.2f}")
-            time.sleep(0.02)
+            
+            # Print current state
+            print(f"Roll: {gimbal.roll_angle:6.1f}° | "
+                  f"Servo: {gimbal.roll_servo.value:+.3f} | "
+                  f"Integral: {gimbal.roll_integral:6.2f}")
+            
+            time.sleep(0.02)  # 50 Hz update rate
             
     except KeyboardInterrupt:
-        print("\nStopping...")
+        print("\n" + "=" * 60)
+        print("⚠ Test stopped by user")
+        print("=" * 60)
+    
     finally:
-        print(f"\nSave this pitch value to your config:")
-        print(f"  GIMBAL_PITCH_FIXED_POSITION = {gimbal.pitch_servo_fixed_position}")
+        print("Cleaning up...")
         gimbal.cleanup()
+        print("✓ Test complete. Servos centered.")
+
+
+if __name__ == "__main__":
+    # Run standalone test when executed directly
+    test_gimbal()

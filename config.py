@@ -120,8 +120,7 @@ GIMBAL_ROLL_PIN = 17   # GPIO 17 for roll stabilization servo
 GIMBAL_PITCH_PIN = 27  # GPIO 27 for pitch angle servo
 
 # --- Gimbal Angles
-GIMBAL_TARGET_PITCH = -45  # Camera pitch angle (negative = downward)
-GIMBAL_MAX_ROLL_COMPENSATION = 30  # Maximum roll compensation (degrees)
+GIMBAL_PITCH_FIXED_POSITION = -0.8
 
 # --- Servo Pulse Width (microseconds)
 GIMBAL_SERVO_MIN_PULSE = 500   # 0.5ms (minimum pulse width)
