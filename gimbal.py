@@ -7,12 +7,13 @@ from gpiozero import Servo
 from mpu6050 import mpu6050
 
 class CameraGimbal:
-    """2-axis gimbal stabilization - servo stabilizes to level, camera mounted at 45°"""
+    """2-axis gimbal stabilization maintaining 45° downward pitch"""
     
-    def __init__(self, roll_pin=17, pitch_pin=27, target_pitch=-225.0, 
+    def __init__(self, roll_pin=17, pitch_pin=27, target_pitch=-45.0, 
                  max_roll_compensation=20.0, use_mpu6050=True, mpu6050_address=0x68):
         
         # Configuration
+        self.target_pitch = target_pitch  # -45° downward
         self.max_roll = max_roll_compensation
         self.max_pitch = max_roll_compensation
         self.use_mpu6050 = use_mpu6050
@@ -60,7 +61,7 @@ class CameraGimbal:
         """Enable gimbal stabilization"""
         self.enabled = True
         self.reset_pid()
-        print("Gimbal enabled - stabilizing to level (camera mounted at 45° down)")
+        print(f"Gimbal enabled - maintaining {abs(self.target_pitch)}° downward pitch")
     
     def disable(self):
         """Disable gimbal and center servos"""
@@ -94,7 +95,7 @@ class CameraGimbal:
     
     def update(self, drone_roll=None, drone_pitch=None):
         """
-        Update gimbal stabilization (EXACTLY like testgim.py)
+        Update gimbal stabilization
         
         Args:
             drone_roll: Current drone roll angle (optional, uses IMU if not provided)
@@ -115,7 +116,7 @@ class CameraGimbal:
                 gyro = self.imu.get_gyro_data()
                 accel_roll, accel_pitch = self._accel_to_angles(accel)
                 
-                # Complementary filter
+                # Complementary filter (EXACTLY like testgim.py)
                 self.roll_angle = self.alpha * (self.roll_angle + gyro["x"] * dt) + (1 - self.alpha) * accel_roll
                 self.pitch_angle = self.alpha * (self.pitch_angle + gyro["y"] * dt) + (1 - self.alpha) * accel_pitch
             except Exception as e:
@@ -136,8 +137,10 @@ class CameraGimbal:
         roll_output = self.kp * roll_error + self.ki * self.roll_integral + self.kd * roll_derivative
         self.roll_servo.value = self._angle_to_servo(roll_output, self.max_roll)
         
-        # --- PID correction for Pitch (EXACTLY like testgim.py) ---
-        pitch_error = -self.pitch_angle
+        # --- PID correction for Pitch (MODIFIED for 45° target) ---
+        # ONLY CHANGE: Instead of stabilizing to 0°, stabilize to -45°
+        pitch_error = -(self.pitch_angle - self.target_pitch)  # Error relative to -45°
+        
         self.pitch_integral += pitch_error * dt
         pitch_derivative = (pitch_error - self.pitch_prev_error) / dt if dt > 0 else 0
         self.pitch_prev_error = pitch_error
@@ -157,22 +160,21 @@ class CameraGimbal:
 # Standalone test mode
 if __name__ == "__main__":
     print("=" * 60)
-    print("GIMBAL TEST MODE (Same logic as testgim.py)")
+    print("GIMBAL TEST - Maintaining 45° Downward Pitch")
     print("=" * 60)
-    print("Servo stabilizes to keep IMU level (0°)")
-    print("Mount camera at 45° angle on the servo for downward view")
+    print("Same as testgim.py, but maintains -45° instead of 0°")
     print("Press Ctrl+C to exit")
     print("=" * 60)
     
-    gimbal = CameraGimbal(use_mpu6050=True)
+    gimbal = CameraGimbal(use_mpu6050=True, target_pitch=-45.0)
     gimbal.enable()
     
     try:
         while True:
             gimbal.update()
-            print(f"Roll: {gimbal.roll_angle:6.1f}° → servo: {gimbal.roll_servo.value:+.2f} | "
-                  f"Pitch: {gimbal.pitch_angle:6.1f}° → servo: {gimbal.pitch_servo.value:+.2f}")
-            time.sleep(0.1)
+            print(f"Roll: {gimbal.roll_angle:6.1f}° → {gimbal.roll_servo.value:+.2f} | "
+                  f"Pitch: {gimbal.pitch_angle:6.1f}° (target: -45°) → {gimbal.pitch_servo.value:+.2f}")
+            time.sleep(0.02)
             
     except KeyboardInterrupt:
         print("\nStopping...")
