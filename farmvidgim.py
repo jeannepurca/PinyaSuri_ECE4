@@ -25,7 +25,7 @@ FARM_VIDEO_DIR = VIDEO_DIR / "farms"
 # Gimbal Configuration
 GIMBAL_ROLL_PIN = 17
 GIMBAL_PITCH_PIN = 27
-GIMBAL_TARGET_PITCH = -45.0  # 45 degrees downward
+GIMBAL_TARGET_PITCH = 45.0  # 45 degrees downward
 USE_GIMBAL = True  # Set to False to disable gimbal
 
 def ensure_directories():

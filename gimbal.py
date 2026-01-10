@@ -9,7 +9,7 @@ from mpu6050 import mpu6050
 class CameraGimbal:
     """2-axis gimbal stabilization maintaining 45° downward pitch"""
     
-    def __init__(self, roll_pin=17, pitch_pin=27, target_pitch=-45.0, 
+    def __init__(self, roll_pin=17, pitch_pin=27, target_pitch=45.0, 
                  max_roll_compensation=20.0, use_mpu6050=True, mpu6050_address=0x68):
         
         # Configuration
