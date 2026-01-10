@@ -96,7 +96,6 @@ class CameraGimbal:
         if dt <= 0:
             return
         
-        # Get roll angle from MPU6050 or fallback to drone telemetry
         if self.use_mpu6050 and self.imu:
             try:
                 # Read IMU data
@@ -106,7 +105,7 @@ class CameraGimbal:
                 # Calculate roll from accelerometer
                 accel_roll = self._accel_to_roll(accel)
                 
-                # Apply low-pass filter to sensor readings
+                # Low-pass filter raw sensor readings
                 self.filtered_gyro_x = self._low_pass_filter(
                     gyro["x"], self.filtered_gyro_x, self.filter_alpha
                 )
@@ -115,50 +114,48 @@ class CameraGimbal:
                     accel_roll, self.filtered_accel_roll, self.filter_alpha
                 )
                 
-                # Use filtered values in complementary filter (ONLY ONCE!)
-                self.roll_angle = (
+                # Complementary filter
+                roll_angle_new = (
                     config.MPU6050_ALPHA * (self.roll_angle + self.filtered_gyro_x * dt) + 
                     (1 - config.MPU6050_ALPHA) * self.filtered_accel_roll
                 )
-                
+
+                # ADDITIONAL LOW-PASS FILTER on final roll angle
+                self.roll_angle = self._low_pass_filter(roll_angle_new, self.roll_angle, self.filter_alpha)
+
             except Exception as e:
                 logger.debug(f"IMU read error: {e}")
                 return  # keep last valid roll_angle
 
-
         # PID control for roll stabilization
         roll_error = -self.roll_angle
 
-        # Apply deadband - BEFORE any calculations
+        # Apply deadband
         if abs(roll_error) < self.deadband:
             roll_error = 0
-            # Also decay the integral when in deadband
             self.roll_integral *= 0.95
 
-        # Anti-windup with LOWER limit
+        # Anti-windup integral
         self.roll_integral = self._clamp(
             self.roll_integral + roll_error * dt,
-            -self.max_integral,  # Use instance variable
+            -self.max_integral,
             self.max_integral
         )
 
-        # Only calculate derivative if error is non-zero
-        if roll_error != 0:
-            roll_derivative = (roll_error - self.roll_prev_error) / dt
-        else:
-            roll_derivative = 0
-        
+        # Derivative
+        roll_derivative = (roll_error - self.roll_prev_error) / dt if roll_error != 0 else 0
         self.roll_prev_error = roll_error
-        
-        # Calculate PID output
+
+        # PID output
         roll_output = (
             config.GIMBAL_PID_KP * roll_error + 
             config.GIMBAL_PID_KI * self.roll_integral + 
             config.GIMBAL_PID_KD * roll_derivative
         )
-        
+
         # Apply to servo
         self.roll_servo.value = self._angle_to_servo(roll_output, self.max_roll_angle)
+
     
     def enable(self):
         """Enable gimbal stabilization"""
