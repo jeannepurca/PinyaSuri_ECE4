@@ -11,21 +11,10 @@ import config
 
 logger = logging.getLogger(__name__)
 
-class CameraGimbal:
-    """
-    Camera gimbal with roll stabilization only.
-    Pitch angle is physically fixed at 45° downward.
-    Uses complementary filter + PID control for smooth stabilization.
-    """
-    
+class CameraGimbal:    
     def __init__(self, roll_pin, use_mpu6050=True, mpu6050_address=0x68):
         """
         Initialize gimbal servo and IMU
-        
-        Args:
-            roll_pin: GPIO pin for roll servo
-            use_mpu6050: Use MPU6050 IMU for stabilization
-            mpu6050_address: I2C address of MPU6050
         """
         self.use_mpu6050 = use_mpu6050
         self.enabled = False
@@ -85,20 +74,16 @@ class CameraGimbal:
     
     def _accel_to_roll(self, accel):
         """Calculate roll angle from accelerometer data"""
-        roll = math.degrees(math.atan2(accel["y"], accel["z"]))
-        return roll
+        return math.degrees(math.atan2(accel["y"], accel["z"]))
     
     def _angle_to_servo(self, angle, max_angle):
         """Convert angle to servo value [-1, +1]"""
         angle = self._clamp(angle, -max_angle, max_angle)
         return angle / max_angle
     
-    def update(self, drone_roll=None):
+    def update(self):
         """
         Update gimbal stabilization
-        
-        Args:
-            drone_roll: Drone's roll angle (degrees) - used if MPU6050 unavailable
         """
         if not self.enabled:
             return
@@ -135,16 +120,11 @@ class CameraGimbal:
                     config.MPU6050_ALPHA * (self.roll_angle + self.filtered_gyro_x * dt) + 
                     (1 - config.MPU6050_ALPHA) * self.filtered_accel_roll
                 )
-
+                
             except Exception as e:
                 logger.debug(f"IMU read error: {e}")
-                # Fallback to drone telemetry
-                if drone_roll is not None:
-                    self.roll_angle = drone_roll
-        else:
-            # Use drone telemetry
-            if drone_roll is not None:
-                self.roll_angle = drone_roll
+                return  # keep last valid roll_angle
+
 
         # PID control for roll stabilization
         roll_error = -self.roll_angle

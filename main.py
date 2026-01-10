@@ -244,11 +244,7 @@ def main_loop(pixhawk, camera, metrics, gimbal, logger):
         
         # Update gimbal stabilization (if enabled)
         if gimbal and gimbal.enabled:
-            # Get current drone roll attitude
-            drone_roll = pixhawk.get_roll()
-            
-            # Update gimbal to compensate for roll
-            gimbal.update(drone_roll)
+            gimbal.update()
         
         # Handle arm/disarm state changes
         was_armed, flight_number = handle_arm_state_change(
