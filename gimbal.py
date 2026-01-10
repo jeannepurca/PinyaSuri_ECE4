@@ -64,8 +64,14 @@ class CameraGimbal:
         self.roll_angle = 0.0
         self.last_time = time.time()
         
-        # Maximum roll correction angle (degrees)
-        self.max_roll_angle = 20.0
+        # INCREASE maximum roll correction angle
+        self.max_roll_angle = 45.0  # Was 20.0 - increase servo authority
+        
+        # Reduce integral limit to prevent aggressive windup
+        self.max_integral = 5.0  # Was 10.0
+        
+        # Add deadband threshold
+        self.deadband = 0.5  # degrees
         
         logger.info("Gimbal initialized - Roll stabilization ACTIVE (pitch is physically fixed)")
 
@@ -141,22 +147,27 @@ class CameraGimbal:
                 self.roll_angle = drone_roll
         
         # PID control for roll stabilization
-        roll_error = -self.roll_angle  # Negative to oppose the tilt
+        roll_error = -self.roll_angle
         
-        # Add deadband to prevent micro-corrections
-        DEADBAND = 0.5  # degrees
-        if abs(roll_error) < DEADBAND:
+        # Apply deadband - BEFORE any calculations
+        if abs(roll_error) < self.deadband:
             roll_error = 0
+            # Also decay the integral when in deadband
+            self.roll_integral *= 0.95
         
-        # Anti-windup: clamp integral
-        MAX_INTEGRAL = 10.0
+        # Anti-windup with LOWER limit
         self.roll_integral = self._clamp(
             self.roll_integral + roll_error * dt,
-            -MAX_INTEGRAL, 
-            MAX_INTEGRAL
+            -self.max_integral,  # Use instance variable
+            self.max_integral
         )
         
-        roll_derivative = (roll_error - self.roll_prev_error) / dt
+        # Only calculate derivative if error is non-zero
+        if roll_error != 0:
+            roll_derivative = (roll_error - self.roll_prev_error) / dt
+        else:
+            roll_derivative = 0
+        
         self.roll_prev_error = roll_error
         
         # Calculate PID output
