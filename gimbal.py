@@ -7,28 +7,23 @@ from gpiozero import Servo
 from mpu6050 import mpu6050
 
 class CameraGimbal:
-    """2-axis gimbal stabilization maintaining 45° downward pitch"""
+    """2-axis gimbal stabilization - servo stabilizes to level, camera mounted at 45°"""
     
     def __init__(self, roll_pin=17, pitch_pin=27, target_pitch=-45.0, 
                  max_roll_compensation=20.0, use_mpu6050=True, mpu6050_address=0x68):
         
         # Configuration
-        self.target_pitch = target_pitch  # -45° downward
         self.max_roll = max_roll_compensation
+        self.max_pitch = max_roll_compensation
         self.use_mpu6050 = use_mpu6050
         
-        # PID gains
+        # PID gains (same as testgim.py)
         self.kp = 0.6
         self.ki = 0.05
         self.kd = 0.03
         
         # Complementary filter
         self.alpha = 0.98
-        
-        # SERVO OFFSET: This maps the desired camera angle to servo position
-        # When IMU is at 0°, we want camera at -45°
-        # Adjust this value based on your physical servo mounting
-        self.pitch_servo_offset = -0.5  # Start at -0.5 (adjust as needed: -1.0 to +1.0)
         
         # Initialize servos
         servo_min = 0.0005
@@ -59,14 +54,13 @@ class CameraGimbal:
         
         # Center servos initially
         self.roll_servo.value = 0
-        self.pitch_servo.value = self.pitch_servo_offset
+        self.pitch_servo.value = 0
     
     def enable(self):
         """Enable gimbal stabilization"""
         self.enabled = True
         self.reset_pid()
-        self.pitch_servo.value = self.pitch_servo_offset
-        print(f"Gimbal enabled - maintaining {abs(self.target_pitch)}° downward pitch")
+        print("Gimbal enabled - stabilizing to level (camera mounted at 45° down)")
     
     def disable(self):
         """Disable gimbal and center servos"""
@@ -100,7 +94,7 @@ class CameraGimbal:
     
     def update(self, drone_roll=None, drone_pitch=None):
         """
-        Update gimbal stabilization
+        Update gimbal stabilization (EXACTLY like testgim.py)
         
         Args:
             drone_roll: Current drone roll angle (optional, uses IMU if not provided)
@@ -134,7 +128,7 @@ class CameraGimbal:
             if drone_pitch is not None:
                 self.pitch_angle = drone_pitch
         
-        # --- PID correction for Roll (stabilize to 0°) ---
+        # --- PID correction for Roll (EXACTLY like testgim.py) ---
         roll_error = -self.roll_angle
         self.roll_integral += roll_error * dt
         roll_derivative = (roll_error - self.roll_prev_error) / dt if dt > 0 else 0
@@ -142,29 +136,15 @@ class CameraGimbal:
         roll_output = self.kp * roll_error + self.ki * self.roll_integral + self.kd * roll_derivative
         self.roll_servo.value = self._angle_to_servo(roll_output, self.max_roll)
         
-        # --- PID correction for Pitch (maintain target angle) ---
-        # Error = how much we deviate from target
-        # If drone pitches down (-10°), we need servo to go UP (+10°) to compensate
-        pitch_error = -self.pitch_angle  # Inverted: drone down → servo up
-        
+        # --- PID correction for Pitch (EXACTLY like testgim.py) ---
+        pitch_error = -self.pitch_angle
         self.pitch_integral += pitch_error * dt
         pitch_derivative = (pitch_error - self.pitch_prev_error) / dt if dt > 0 else 0
         self.pitch_prev_error = pitch_error
         pitch_output = self.kp * pitch_error + self.ki * self.pitch_integral + self.kd * pitch_derivative
         
-        # Apply correction + base offset for 45° downward
-        servo_position = self.pitch_servo_offset + self._angle_to_servo(pitch_output, self.max_roll)
-        servo_position = self._clamp(servo_position, -1.0, 1.0)
-        
-        self.pitch_servo.value = servo_position
-    
-    def set_pitch_offset(self, offset):
-        """
-        Manually adjust pitch servo offset for calibration
-        offset: -1.0 to +1.0 (negative = more downward)
-        """
-        self.pitch_servo_offset = self._clamp(offset, -1.0, 1.0)
-        print(f"Pitch servo offset set to: {self.pitch_servo_offset:.2f}")
+        # EXACTLY like testgim.py: negated output
+        self.pitch_servo.value = -self._angle_to_servo(pitch_output, self.max_pitch)
     
     def cleanup(self):
         """Clean up resources"""
@@ -174,57 +154,27 @@ class CameraGimbal:
         print("Gimbal cleanup complete")
 
 
-# Standalone test mode with calibration
+# Standalone test mode
 if __name__ == "__main__":
     print("=" * 60)
-    print("GIMBAL CALIBRATION & TEST MODE")
+    print("GIMBAL TEST MODE (Same logic as testgim.py)")
     print("=" * 60)
-    print("This will help you find the correct pitch servo offset")
-    print("to achieve 45° downward camera angle when IMU is level")
+    print("Servo stabilizes to keep IMU level (0°)")
+    print("Mount camera at 45° angle on the servo for downward view")
+    print("Press Ctrl+C to exit")
     print("=" * 60)
     
     gimbal = CameraGimbal(use_mpu6050=True)
     gimbal.enable()
     
-    print("\nCOMMANDS:")
-    print("  Press ENTER to see current status")
-    print("  Type offset value (-1.0 to +1.0) to adjust pitch")
-    print("  Examples: -0.3, -0.5, -0.7 (more negative = more downward)")
-    print("  Type 'q' to quit")
-    print("\nCurrent offset:", gimbal.pitch_servo_offset)
-    
     try:
         while True:
             gimbal.update()
-            
-            # Non-blocking input check
-            import select
-            import sys
-            
-            if select.select([sys.stdin], [], [], 0.02)[0]:
-                user_input = input().strip().lower()
-                
-                if user_input == 'q':
-                    break
-                elif user_input == '':
-                    print(f"\nStatus:")
-                    print(f"  IMU Pitch: {gimbal.pitch_angle:6.1f}°")
-                    print(f"  Servo offset: {gimbal.pitch_servo_offset:+.2f}")
-                    print(f"  Servo position: {gimbal.pitch_servo.value:+.2f}")
-                    print(f"  Roll: {gimbal.roll_angle:6.1f}°")
-                else:
-                    try:
-                        offset = float(user_input)
-                        gimbal.set_pitch_offset(offset)
-                    except ValueError:
-                        print("Invalid input. Use number between -1.0 and +1.0")
-            
-            time.sleep(0.02)
+            print(f"Roll: {gimbal.roll_angle:6.1f}° → servo: {gimbal.roll_servo.value:+.2f} | "
+                  f"Pitch: {gimbal.pitch_angle:6.1f}° → servo: {gimbal.pitch_servo.value:+.2f}")
+            time.sleep(0.1)
             
     except KeyboardInterrupt:
         print("\nStopping...")
     finally:
-        print(f"\nFinal offset value: {gimbal.pitch_servo_offset}")
-        print("Add this to your config.py:")
-        print(f"  GIMBAL_PITCH_SERVO_OFFSET = {gimbal.pitch_servo_offset}")
         gimbal.cleanup()
