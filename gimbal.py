@@ -1,229 +1,116 @@
 #!/usr/bin/env python3
-# gimbal.py - Enhanced with MPU6050 IMU sensor (integrated working PID + complementary filter)
+# gimbal.py
 
 import time
-import logging
 import math
 from gpiozero import Servo
+from mpu6050 import mpu6050
 
-import config
+# -----------------------------
+# CONFIGURATION
+# -----------------------------
+ROLL_SERVO_PIN = 17
+PITCH_SERVO_PIN = 27
 
-logger = logging.getLogger("Gimbal")
+MAX_ROLL_ANGLE = 20.0
+TARGET_PITCH_ANGLE = -45.0  # 45 degrees downward
 
-CONTROL_HZ = 50.0
-DT = 1.0 / CONTROL_HZ
+UPDATE_DELAY = 0.02    # 50 Hz
+ALPHA = 0.98           # complementary filter
 
-# ==============================
-# MPU6050 Handler (integrated)
-# ==============================
+# PID gains
+KP = 0.6
+KI = 0.05
+KD = 0.03
 
-class MPU6050Handler:
-    def __init__(self, i2c_address=0x68, alpha=0.98, calibration_samples=100):
-        """Initialize MPU6050 sensor"""
-        try:
-            from mpu6050 import mpu6050
-            self.sensor = mpu6050(i2c_address)
-            logger.info(f"✓ MPU6050 connected at 0x{i2c_address:02X}")
-        except Exception as e:
-            logger.error(f"⚠ MPU6050 init failed: {e}")
-            raise
-        
-        self.alpha = alpha
-        self.roll = 0.0
-        self.pitch = 0.0
-        self.last_time = time.time()
+SERVO_MIN = 0.0005
+SERVO_MAX = 0.0025
 
-        self.gyro_offset = {"x": 0.0, "y": 0.0, "z": 0.0}
-        self.accel_offset = {"x": 0.0, "y": 0.0, "z": 0.0}
-        
-        self.calibrate(calibration_samples)
+# -----------------------------
+# INITIALIZE HARDWARE
+# -----------------------------
+imu = mpu6050(0x68)
+roll_servo = Servo(ROLL_SERVO_PIN, min_pulse_width=SERVO_MIN, max_pulse_width=SERVO_MAX)
+pitch_servo = Servo(PITCH_SERVO_PIN, min_pulse_width=SERVO_MIN, max_pulse_width=SERVO_MAX)
 
-    def calibrate(self, samples=100):
-        logger.info("⏳ Calibrating MPU6050, keep gimbal stationary...")
-        gyro_sum = {"x":0,"y":0,"z":0}
-        accel_sum = {"x":0,"y":0,"z":0}
-        for _ in range(samples):
-            g = self.sensor.get_gyro_data()
-            a = self.sensor.get_accel_data()
-            for k in "xyz":
-                gyro_sum[k] += g[k]
-            for k in "xyz":
-                accel_sum[k] += a[k]
-            time.sleep(0.01)
-        self.gyro_offset = {k: v / samples for k,v in gyro_sum.items()}
-        self.accel_offset = {k: accel_sum[k]/samples for k in "xyz"}
-        logger.info("✓ Calibration complete")
+# -----------------------------
+# PID STATE
+# -----------------------------
+roll_integral = 0
+roll_prev_error = 0
+pitch_integral = 0
+pitch_prev_error = 0
 
-    def get_calibrated_gyro(self):
-        raw = self.sensor.get_gyro_data()
-        return {k: raw[k]-self.gyro_offset[k] for k in raw}
+# -----------------------------
+# FILTER STATE
+# -----------------------------
+roll_angle = 0.0
+pitch_angle = 0.0
+last_time = time.time()
 
-    def get_calibrated_accel(self):
-        raw = self.sensor.get_accel_data()
-        return {k: raw[k]-self.accel_offset[k] for k in raw}
+# -----------------------------
+# HELPER FUNCTIONS
+# -----------------------------
+def clamp(value, min_val, max_val):
+    return max(min(value, max_val), min_val)
 
-    def accel_to_angles(self, accel):
-        roll = math.degrees(math.atan2(accel["y"], accel["z"]))
-        pitch = math.degrees(math.atan2(-accel["x"], math.sqrt(accel["y"]**2 + accel["z"]**2)))
-        return roll, pitch
+def accel_to_angles(accel):
+    roll = math.degrees(math.atan2(accel["y"], accel["z"]))
+    pitch = math.degrees(math.atan2(-accel["x"], math.sqrt(accel["y"]**2 + accel["z"]**2)))
+    return roll, pitch
 
-    def update_attitude(self):
-        now = time.time()
-        dt = now - self.last_time
-        if dt <= 0: dt = DT
-        self.last_time = now
+def angle_to_servo(angle, max_angle):
+    angle = clamp(angle, -max_angle, max_angle)
+    return angle / max_angle  # [-1, +1]
 
-        accel = self.get_calibrated_accel()
-        gyro = self.get_calibrated_gyro()
-        accel_roll, accel_pitch = self.accel_to_angles(accel)
+# -----------------------------
+# MAIN LOOP
+# -----------------------------
+try:
+    print("Gimbal stabilization started. Maintaining 45° downward pitch.")
+    
+    while True:
+        current_time = time.time()
+        dt = current_time - last_time
+        last_time = current_time
 
-        # complementary filter
-        self.roll = self.alpha*(self.roll + gyro["x"]*dt) + (1-self.alpha)*accel_roll
-        self.pitch = self.alpha*(self.pitch + gyro["y"]*dt) + (1-self.alpha)*accel_pitch
+        # --- IMU readings ---
+        accel = imu.get_accel_data()
+        gyro = imu.get_gyro_data()  # degrees/sec
+        accel_roll, accel_pitch = accel_to_angles(accel)
 
-        return self.roll, self.pitch
+        # --- Complementary filter ---
+        roll_angle = ALPHA * (roll_angle + gyro["x"] * dt) + (1 - ALPHA) * accel_roll
+        pitch_angle = ALPHA * (pitch_angle + gyro["y"] * dt) + (1 - ALPHA) * accel_pitch
 
-    def get_attitude(self):
-        return self.roll, self.pitch
+        # --- PID correction ---
+        # Roll: stabilize to 0° (level horizon)
+        roll_error = -roll_angle
+        roll_integral += roll_error * dt
+        roll_derivative = (roll_error - roll_prev_error) / dt if dt > 0 else 0
+        roll_prev_error = roll_error
+        roll_output = KP*roll_error + KI*roll_integral + KD*roll_derivative
+        roll_servo.value = angle_to_servo(roll_output, MAX_ROLL_ANGLE)
 
-# ==============================
-# PID Controller
-# ==============================
+        # Pitch: maintain 45° downward regardless of drone altitude changes
+        pitch_error = TARGET_PITCH_ANGLE - pitch_angle
+        pitch_integral += pitch_error * dt
+        pitch_derivative = (pitch_error - pitch_prev_error) / dt if dt > 0 else 0
+        pitch_prev_error = pitch_error
+        pitch_output = KP*pitch_error + KI*pitch_integral + KD*pitch_derivative
+        pitch_servo.value = angle_to_servo(pitch_output, MAX_ROLL_ANGLE)
 
-class PIDController:
-    def __init__(self, kp, ki, kd, output_limits=(-1,1), integral_limit=50.0):
-        self.kp = kp
-        self.ki = ki
-        self.kd = kd
-        self.output_limits = output_limits
-        self.integral_limit = integral_limit
-        self.integral = 0.0
-        self.prev_error = 0.0
+        print(f"Roll: {roll_angle:6.1f}° → servo: {roll_servo.value:+.2f} | "
+              f"Pitch: {pitch_angle:6.1f}° (target: {TARGET_PITCH_ANGLE}°) → servo: {pitch_servo.value:+.2f}")
 
-    def update(self, error, dt):
-        self.integral += error*dt
-        self.integral = max(min(self.integral, self.integral_limit), -self.integral_limit)
-        derivative = (error - self.prev_error)/dt if dt>0 else 0
-        output = self.kp*error + self.ki*self.integral + self.kd*derivative
-        output = max(min(output, self.output_limits[1]), self.output_limits[0])
-        self.prev_error = error
-        return output
+        time.sleep(UPDATE_DELAY)
 
-    def reset(self):
-        self.integral = 0.0
-        self.prev_error = 0.0
+except KeyboardInterrupt:
+    print("\nStopping gimbal...")
 
-# ==============================
-# Camera Gimbal
-# ==============================
-
-class CameraGimbal:
-    def __init__(self,
-                 roll_pin=config.GIMBAL_ROLL_PIN,
-                 pitch_pin=config.GIMBAL_PITCH_PIN,
-                 use_mpu6050=config.USE_MPU6050,
-                 max_roll=config.GIMBAL_MAX_ROLL_COMPENSATION,
-                 target_pitch=config.GIMBAL_TARGET_PITCH):
-
-        self.target_pitch = target_pitch
-        self.max_roll_compensation = max_roll
-        self.use_mpu6050 = use_mpu6050
-        self.enabled = False
-
-        # init PID
-        self.roll_pid = PIDController(kp=config.GIMBAL_PID_KP,
-                                      ki=config.GIMBAL_PID_KI,
-                                      kd=config.GIMBAL_PID_KD,
-                                      output_limits=(-1,1))
-
-        # init servos
-        try:
-            from gpiozero.pins.pigpio import PiGPIOFactory
-            factory = PiGPIOFactory()
-        except Exception:
-            factory = None
-
-        pulse_min = config.GIMBAL_SERVO_MIN_PULSE / 1_000_000
-        pulse_max = config.GIMBAL_SERVO_MAX_PULSE / 1_000_000
-
-        self.roll_servo = Servo(roll_pin, min_pulse_width=pulse_min, max_pulse_width=pulse_max, pin_factory=factory)
-        self.pitch_servo = Servo(pitch_pin, min_pulse_width=pulse_min, max_pulse_width=pulse_max, pin_factory=factory)
-
-        # init IMU
-        self.imu = None
-        if use_mpu6050:
-            try:
-                self.imu = MPU6050Handler(alpha=config.MPU6050_ALPHA)
-            except Exception as e:
-                logger.warning(f"MPU6050 init failed: {e}")
-                self.use_mpu6050 = False
-
-        # init state
-        self.current_roll_comp = 0.0
-        self.last_time = time.time()
-
-    def angle_to_servo_value(self, angle, max_angle):
-        return max(min(angle/max_angle, 1.0), -1.0)
-
-    def set_roll_compensation(self, angle):
-        angle = max(min(angle, self.max_roll_compensation), -self.max_roll_compensation)
-        self.roll_servo.value = self.angle_to_servo_value(angle, self.max_roll_compensation)
-        self.current_roll_comp = angle
-
-    def set_pitch_angle(self, angle):
-        self.pitch_servo.value = self.angle_to_servo_value(angle, 90.0)
-
-    def enable(self):
-        self.enabled = True
-        self.roll_pid.reset()
-        if self.imu:
-            self.imu.last_time = time.time()
-        logger.info("✓ Gimbal ENABLED")
-
-    def disable(self):
-        self.enabled = False
-        self.set_roll_compensation(0)
-        self.set_pitch_angle(self.target_pitch)
-        logger.info("⚠ Gimbal DISABLED")
-
-    def update(self, drone_roll=None, drone_pitch=None):
-        if not self.enabled:
-            return 0.0
-
-        now = time.time()
-        dt = now - self.last_time
-        if dt <= 0: dt = DT
-        self.last_time = now
-
-        if self.use_mpu6050 and self.imu:
-            self.imu.update_attitude()
-            roll, pitch = self.imu.get_attitude()
-            roll_error = -roll
-        else:
-            if drone_roll is None:
-                return self.current_roll_comp
-            roll_error = -drone_roll
-
-        roll_pid_output = self.roll_pid.update(roll_error, dt)
-        roll_angle = roll_pid_output * self.max_roll_compensation
-        self.set_roll_compensation(roll_angle)
-
-        # maintain target pitch
-        self.set_pitch_angle(self.target_pitch)
-
-        return roll_angle
-
-    def get_status(self):
-        status = {"enabled": self.enabled, "roll_comp": self.current_roll_comp, "target_pitch": self.target_pitch}
-        if self.imu:
-            status["imu_roll"], status["imu_pitch"] = self.imu.get_attitude()
-        return status
-
-    def cleanup(self):
-        logger.info("Shutting down gimbal...")
-        self.set_roll_compensation(0)
-        self.set_pitch_angle(self.target_pitch)
-        time.sleep(0.2)
-        self.roll_servo.close()
-        self.pitch_servo.close()
-        logger.info("✓ Gimbal shutdown complete")
+finally:
+    roll_servo.value = 0
+    pitch_servo.value = 0
+    roll_servo.close()
+    pitch_servo.close()
+    print("Servos centered. Gimbal stopped.")
