@@ -9,7 +9,7 @@ from collections import deque
 from datetime import datetime
 import config
 
-logger = logging.getLogger("FlightMetrics")
+logger = logging.getLogger(__name__)
 
 class FlightMetrics:
     def __init__(self, window_size=config.METRICS_WINDOW_SIZE):

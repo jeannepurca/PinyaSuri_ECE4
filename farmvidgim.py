@@ -10,6 +10,8 @@ from libcamera import controls
 from datetime import datetime
 from pathlib import Path
 
+import config
+
 # Import gimbal
 try:
     from gimbal import CameraGimbal
@@ -18,19 +20,15 @@ except ImportError:
     GIMBAL_AVAILABLE = False
     print("Warning: gimbal.py not found. Running without stabilization.")
 
-BASE_DIR = Path(__file__).resolve().parent
-VIDEO_DIR = BASE_DIR / "videos"
+# Video Directory
+VIDEO_DIR = config.BASE_DIR / "videos"
 FARM_VIDEO_DIR = VIDEO_DIR / "farms"
 
-# Gimbal Configuration
-GIMBAL_ROLL_PIN = 17
-GIMBAL_PITCH_PIN = 27
-GIMBAL_TARGET_PITCH = 45.0  # 45 degrees downward
-USE_GIMBAL = True  # Set to False to disable gimbal
 
 def ensure_directories():
     VIDEO_DIR.mkdir(exist_ok=True)
     FARM_VIDEO_DIR.mkdir(exist_ok=True)
+
 
 def gimbal_update_thread(gimbal, stop_event):
     """Background thread to continuously update gimbal"""
@@ -41,6 +39,7 @@ def gimbal_update_thread(gimbal, stop_event):
         except Exception as e:
             print(f"Gimbal update error: {e}")
             break
+
 
 def record_video():
     ensure_directories()
@@ -58,12 +57,13 @@ def record_video():
     gimbal_thread = None
     stop_gimbal = None
     
-    if USE_GIMBAL and GIMBAL_AVAILABLE:
+    if config.GIMBAL_ENABLED and GIMBAL_AVAILABLE:
         try:
             gimbal = CameraGimbal(
-                roll_pin=GIMBAL_ROLL_PIN,
-                pitch_pin=GIMBAL_PITCH_PIN,
-                use_mpu6050=True
+                roll_pin=config.GIMBAL_ROLL_PIN,
+                pitch_pin=config.GIMBAL_PITCH_PIN,
+                use_mpu6050=config.USE_MPU6050,
+                mpu6050_address=config.MPU6050_I2C_ADDRESS
             )
             gimbal.enable()
             
@@ -163,6 +163,7 @@ def record_video():
         print(f"\nTotal videos recorded: {video_count}")
         print(f"Saved in: {farm_dir}")
         print("Camera and gimbal stopped.")
+
 
 if __name__ == "__main__":
     record_video()

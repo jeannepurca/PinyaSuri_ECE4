@@ -6,7 +6,7 @@ import pathlib
 from datetime import datetime
 from picamera2 import Picamera2
 
-logger = logging.getLogger("Camera")
+logger = logging.getLogger(__name__)
 
 class Camera:
     def __init__(self, output_dir=None):

@@ -8,7 +8,7 @@ from collections import deque
 import config
 from pymavlink import mavutil
 
-logger = logging.getLogger("Pixhawk")
+logger = logging.getLogger(__name__)
 
 class Pixhawk:
     def __init__(self):

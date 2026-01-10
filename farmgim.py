@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# farm.py
+# farmgim.py
 
 import time
 import threading
@@ -7,6 +7,8 @@ from picamera2 import Picamera2
 from libcamera import controls
 from datetime import datetime
 from pathlib import Path
+
+import config
 
 # Import gimbal
 try:
@@ -17,20 +19,12 @@ except ImportError:
     print("Warning: gimbal.py not found. Running without stabilization.")
 
 # Base Directories
-BASE_DIR = Path(__file__).resolve().parent
-IMAGE_DIR = BASE_DIR / "images"
-FARM_IMAGE_DIR = IMAGE_DIR / "farms"
-
-# Gimbal Configuration
-GIMBAL_ROLL_PIN = 17
-GIMBAL_PITCH_PIN = 27
-GIMBAL_TARGET_PITCH = 45.0  # 45 degrees downward
-USE_GIMBAL = True  # Set to False to disable gimbal
+FARM_IMAGE_DIR = config.IMAGE_DIR / "farms"
 
 
 def ensure_directories():
     """Create all necessary directories"""
-    IMAGE_DIR.mkdir(exist_ok=True)
+    config.ensure_directories()
     FARM_IMAGE_DIR.mkdir(exist_ok=True)
 
 
@@ -63,14 +57,14 @@ def capture_image():
     gimbal_thread = None
     stop_gimbal = None
     
-    if USE_GIMBAL and GIMBAL_AVAILABLE:
+    if config.GIMBAL_ENABLED and GIMBAL_AVAILABLE:
         try:
             print("Initializing gimbal...")
             gimbal = CameraGimbal(
-                roll_pin=GIMBAL_ROLL_PIN,
-                pitch_pin=GIMBAL_PITCH_PIN,
-                target_pitch=GIMBAL_TARGET_PITCH,
-                use_mpu6050=True
+                roll_pin=config.GIMBAL_ROLL_PIN,
+                pitch_pin=config.GIMBAL_PITCH_PIN,
+                use_mpu6050=config.USE_MPU6050,
+                mpu6050_address=config.MPU6050_I2C_ADDRESS
             )
             gimbal.enable()
             
