@@ -43,10 +43,17 @@ class CameraGimbal:
         
         # Initialize MPU6050 if enabled
         self.imu = None
+        self.gyro_offset_x = 0.0  # Gyroscope calibration offset
+        self.accel_offset_roll = 0.0  # Accelerometer calibration offset
+        
         if self.use_mpu6050:
             try:
                 self.imu = mpu6050(mpu6050_address)
                 logger.info(f"MPU6050 initialized at address 0x{mpu6050_address:02X}")
+                
+                # Calibrate IMU on startup
+                self._calibrate_imu()
+                
             except Exception as e:
                 logger.warning(f"MPU6050 initialization failed: {e}")
                 self.use_mpu6050 = False
@@ -63,6 +70,40 @@ class CameraGimbal:
         self.max_roll_angle = 20.0
         
         logger.info("Gimbal initialized - Roll stabilization ACTIVE (pitch is physically fixed)")
+    
+    def _calibrate_imu(self):
+        """
+        Calibrate IMU by averaging readings while stationary.
+        This removes gyroscope drift and accelerometer bias.
+        """
+        if not self.imu:
+            return
+        
+        logger.info("Calibrating IMU... Keep the sensor STILL!")
+        
+        gyro_x_sum = 0.0
+        accel_roll_sum = 0.0
+        samples = config.MPU6050_CALIBRATION_SAMPLES
+        
+        for i in range(samples):
+            try:
+                accel = self.imu.get_accel_data()
+                gyro = self.imu.get_gyro_data()
+                
+                gyro_x_sum += gyro["x"]
+                accel_roll_sum += self._accel_to_roll(accel)
+                
+                time.sleep(0.01)  # 10ms between samples
+            except Exception as e:
+                logger.warning(f"Calibration sample {i} failed: {e}")
+        
+        # Calculate offsets (average of all samples)
+        self.gyro_offset_x = gyro_x_sum / samples
+        self.accel_offset_roll = accel_roll_sum / samples
+        
+        logger.info(f"IMU calibration complete:")
+        logger.info(f"  Gyro X offset: {self.gyro_offset_x:.3f} °/s")
+        logger.info(f"  Accel roll offset: {self.accel_offset_roll:.3f}°")
     
     def _clamp(self, value, min_val, max_val):
         """Clamp value between min and max"""
@@ -106,10 +147,14 @@ class CameraGimbal:
                 # Calculate roll from accelerometer
                 accel_roll = self._accel_to_roll(accel)
                 
+                # Apply calibration offsets
+                gyro_x_corrected = gyro["x"] - self.gyro_offset_x
+                accel_roll_corrected = accel_roll - self.accel_offset_roll
+                
                 # Complementary filter
                 self.roll_angle = (
-                    config.MPU6050_ALPHA * (self.roll_angle + gyro["x"] * dt) + 
-                    (1 - config.MPU6050_ALPHA) * accel_roll
+                    config.MPU6050_ALPHA * (self.roll_angle + gyro_x_corrected * dt) + 
+                    (1 - config.MPU6050_ALPHA) * accel_roll_corrected
                 )
                 
             except Exception as e:

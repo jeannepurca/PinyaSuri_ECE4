@@ -102,9 +102,11 @@ MPU6050_I2C_ADDRESS = 0x68
 # --- Complementary filter coefficient (0.90-0.98 recommended)
 # Higher = more trust in gyroscope (fast, but drifts)
 # Lower = more trust in accelerometer (stable, but noisy)
+# Try 0.96-0.99 if you experience drift
 MPU6050_ALPHA = 0.98
 
 # --- Calibration samples (more = better accuracy, but slower startup)
+# Increase to 200-500 if you see persistent angle errors
 MPU6050_CALIBRATION_SAMPLES = 100
 
 
