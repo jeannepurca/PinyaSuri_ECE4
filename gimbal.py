@@ -72,6 +72,10 @@ class CameraGimbal:
         
         # Add deadband threshold
         self.deadband = 0.5  # degrees
+
+        # Servo output smoothing (slew-rate limiting)
+        self.max_servo_speed = 1.2   # servo units per second (tune 0.8–1.5)
+        self.last_servo_value = 0.0
         
         logger.info("Gimbal initialized - Roll stabilization ACTIVE (pitch is physically fixed)")
 
@@ -177,14 +181,24 @@ class CameraGimbal:
             config.GIMBAL_PID_KD * roll_derivative
         )
         
-        # Apply to servo
-        self.roll_servo.value = self._angle_to_servo(roll_output, self.max_roll_angle)
+        # Convert PID output to target servo value
+        target_servo = self._angle_to_servo(roll_output, self.max_roll_angle)
+
+        # Slew-rate limiting (servo speed control)
+        max_step = self.max_servo_speed * dt
+        delta = target_servo - self.last_servo_value
+        delta = self._clamp(delta, -max_step, max_step)
+
+        self.last_servo_value += delta
+        self.roll_servo.value = self.last_servo_value
     
     def enable(self):
         """Enable gimbal stabilization"""
         self.enabled = True
         self.roll_integral = 0
         self.roll_prev_error = 0
+        self.last_servo_value = 0.0
+        self.roll_servo.value = 0.0
         self.last_time = time.time()
         logger.info("Gimbal stabilization ENABLED")
     
