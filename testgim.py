@@ -10,7 +10,7 @@ from mpu6050 import mpu6050
 # CONFIGURATION
 # -----------------------------
 ROLL_SERVO_PIN = 17
-PITCH_SERVO_PIN = 18
+PITCH_SERVO_PIN = 27
 
 MAX_ROLL_ANGLE = 20.0
 MAX_PITCH_ANGLE = 20.0
