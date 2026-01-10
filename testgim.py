@@ -81,7 +81,7 @@ try:
 
         # --- Complementary filter ---
         roll_angle = ALPHA * (roll_angle + gyro["x"] * dt) + (1 - ALPHA) * accel_roll
-        pitch_angle = ALPHA * (pitch_angle + gyro["x"] * dt) + (1 - ALPHA) * accel_pitch
+        pitch_angle = ALPHA * (pitch_angle + gyro["y"] * dt) + (1 - ALPHA) * accel_pitch
 
         # --- PID correction ---
         # Roll
@@ -98,7 +98,7 @@ try:
         pitch_derivative = (pitch_error - pitch_prev_error) / dt if dt > 0 else 0
         pitch_prev_error = pitch_error
         pitch_output = KP*pitch_error + KI*pitch_integral + KD*pitch_derivative
-        pitch_servo.value = -angle_to_servo(pitch_output, MAX_PITCH_ANGLE)
+        pitch_servo.value = angle_to_servo(pitch_output, MAX_PITCH_ANGLE)
 
         print(f"Roll: {roll_angle:6.1f}° → {roll_output:6.1f} | "
               f"Pitch: {pitch_angle:6.1f}° → {pitch_output:6.1f}°")
