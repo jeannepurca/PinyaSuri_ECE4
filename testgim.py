@@ -81,7 +81,7 @@ try:
 
         # --- Complementary filter ---
         roll_angle = ALPHA * (roll_angle + gyro["x"] * dt) + (1 - ALPHA) * accel_roll
-        pitch_angle = ALPHA * (pitch_angle + gyro["y"] * dt) + (1 - ALPHA) * accel_pitch
+        pitch_angle = ALPHA * (pitch_angle + gyro["x"] * dt) + (1 - ALPHA) * accel_pitch
 
         # --- PID correction ---
         # Roll
