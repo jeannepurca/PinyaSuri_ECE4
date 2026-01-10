@@ -127,7 +127,7 @@ GIMBAL_SERVO_MIN_PULSE = 500   # 0.5ms (minimum pulse width)
 GIMBAL_SERVO_MAX_PULSE = 2500  # 2.5ms (maximum pulse width)
 
 # --- PID Tuning (adjust these based on your servo response)
-GIMBAL_PID_KP = 0.8   # Proportional gain
+GIMBAL_PID_KP = 0.5   # Proportional gain
 GIMBAL_PID_KI = 0.05  # Integral gain
 GIMBAL_PID_KD = 0.05   # Derivative gain
 
