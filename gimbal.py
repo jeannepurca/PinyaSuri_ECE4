@@ -30,6 +30,11 @@ class CameraGimbal:
         self.use_mpu6050 = use_mpu6050
         self.enabled = False
         
+        # Add filtered sensor values
+        self.filtered_gyro_x = 0.0
+        self.filtered_accel_roll = 0.0
+        self.filter_alpha = 0.1  # Lower = smoother but slower response
+
         # Convert pulse widths from microseconds to seconds
         servo_min = config.GIMBAL_SERVO_MIN_PULSE / 1_000_000
         servo_max = config.GIMBAL_SERVO_MAX_PULSE / 1_000_000
@@ -63,7 +68,11 @@ class CameraGimbal:
         self.max_roll_angle = 20.0
         
         logger.info("Gimbal initialized - Roll stabilization ACTIVE (pitch is physically fixed)")
-    
+
+    def _low_pass_filter(self, new_value, old_value, alpha):
+        """Simple low-pass filter"""
+        return alpha * new_value + (1 - alpha) * old_value
+
     def _clamp(self, value, min_val, max_val):
         """Clamp value between min and max"""
         return max(min(value, max_val), min_val)
@@ -106,12 +115,21 @@ class CameraGimbal:
                 # Calculate roll from accelerometer
                 accel_roll = self._accel_to_roll(accel)
                 
-                # Complementary filter
-                self.roll_angle = (
-                    config.MPU6050_ALPHA * (self.roll_angle + gyro["x"] * dt) + 
-                    (1 - config.MPU6050_ALPHA) * accel_roll
+                # Apply low-pass filter to sensor readings
+                self.filtered_gyro_x = self._low_pass_filter(
+                    gyro["x"], self.filtered_gyro_x, self.filter_alpha
                 )
                 
+                self.filtered_accel_roll = self._low_pass_filter(
+                    accel_roll, self.filtered_accel_roll, self.filter_alpha
+                )
+                
+                # Use filtered values in complementary filter (ONLY ONCE!)
+                self.roll_angle = (
+                    config.MPU6050_ALPHA * (self.roll_angle + self.filtered_gyro_x * dt) + 
+                    (1 - config.MPU6050_ALPHA) * self.filtered_accel_roll
+                )
+
             except Exception as e:
                 logger.debug(f"IMU read error: {e}")
                 # Fallback to drone telemetry
@@ -124,7 +142,20 @@ class CameraGimbal:
         
         # PID control for roll stabilization
         roll_error = -self.roll_angle  # Negative to oppose the tilt
-        self.roll_integral += roll_error * dt
+        
+        # Add deadband to prevent micro-corrections
+        DEADBAND = 0.5  # degrees
+        if abs(roll_error) < DEADBAND:
+            roll_error = 0
+        
+        # Anti-windup: clamp integral
+        MAX_INTEGRAL = 10.0
+        self.roll_integral = self._clamp(
+            self.roll_integral + roll_error * dt,
+            -MAX_INTEGRAL, 
+            MAX_INTEGRAL
+        )
+        
         roll_derivative = (roll_error - self.roll_prev_error) / dt
         self.roll_prev_error = roll_error
         
