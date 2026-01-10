@@ -90,7 +90,7 @@ try:
         pitch_prev_error = pitch_error
 
         pitch_output = KP*pitch_error + KI*pitch_integral + KD*pitch_derivative
-        pitch_servo.value = angle_to_servo(pitch_output, MAX_PITCH_ANGLE)
+        pitch_servo.value = -angle_to_servo(pitch_output, MAX_PITCH_ANGLE)
 
         # Print status
         print(f"Roll: {roll:6.1f}° → {roll_output:6.1f}° | "
