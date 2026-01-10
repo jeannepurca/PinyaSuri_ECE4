@@ -102,7 +102,11 @@ class CameraGimbal:
                 # Read IMU data
                 accel = self.imu.get_accel_data()
                 gyro = self.imu.get_gyro_data()  # degrees/sec
-                
+
+                # --- APPLY OFFSETS ---
+                accel = {axis: accel[axis] - config.MPU6050_ACCEL_OFFSET[axis] for axis in ['x','y','z']}
+                gyro  = {axis: gyro[axis]  - config.MPU6050_GYRO_OFFSET[axis]  for axis in ['x','y','z']}
+
                 # Calculate roll from accelerometer
                 accel_roll = self._accel_to_roll(accel)
                 
