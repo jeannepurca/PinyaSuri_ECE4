@@ -22,7 +22,7 @@ class CameraGimbal:
         # Add filtered sensor values
         self.filtered_gyro_x = 0.0
         self.filtered_accel_roll = 0.0
-        self.filter_alpha = 0.1  # Lower = smoother but slower response
+        self.filter_alpha = 0.05  # Lower = smoother but slower response
 
         # Convert pulse widths from microseconds to seconds
         servo_min = config.GIMBAL_SERVO_MIN_PULSE / 1_000_000
