@@ -71,12 +71,8 @@ class CameraGimbal:
         self.max_integral = 5.0  # Was 10.0
         
         # Add deadband threshold
-        self.deadband = 1.0  # degrees
+        self.deadband = 0.5  # degrees
 
-        # Servo output smoothing (slew-rate limiting)
-        self.max_servo_speed = 1.0   # servo units per second (tune 0.8–1.5)
-        self.last_servo_value = 0.0
-        
         logger.info("Gimbal initialized - Roll stabilization ACTIVE (pitch is physically fixed)")
 
     def _low_pass_filter(self, new_value, old_value, alpha):
@@ -149,23 +145,23 @@ class CameraGimbal:
             # Use drone telemetry
             if drone_roll is not None:
                 self.roll_angle = drone_roll
-        
+
         # PID control for roll stabilization
         roll_error = -self.roll_angle
-        
+
         # Apply deadband - BEFORE any calculations
         if abs(roll_error) < self.deadband:
             roll_error = 0
             # Also decay the integral when in deadband
             self.roll_integral *= 0.95
-        
+
         # Anti-windup with LOWER limit
         self.roll_integral = self._clamp(
             self.roll_integral + roll_error * dt,
             -self.max_integral,  # Use instance variable
             self.max_integral
         )
-        
+
         # Only calculate derivative if error is non-zero
         if roll_error != 0:
             roll_derivative = (roll_error - self.roll_prev_error) / dt
@@ -181,24 +177,14 @@ class CameraGimbal:
             config.GIMBAL_PID_KD * roll_derivative
         )
         
-        # Convert PID output to target servo value
-        target_servo = self._angle_to_servo(roll_output, self.max_roll_angle)
-
-        # Slew-rate limiting (servo speed control)
-        max_step = self.max_servo_speed * dt
-        delta = target_servo - self.last_servo_value
-        delta = self._clamp(delta, -max_step, max_step)
-
-        self.last_servo_value += delta
-        self.roll_servo.value = self.last_servo_value
+        # Apply to servo
+        self.roll_servo.value = self._angle_to_servo(roll_output, self.max_roll_angle)
     
     def enable(self):
         """Enable gimbal stabilization"""
         self.enabled = True
         self.roll_integral = 0
         self.roll_prev_error = 0
-        self.last_servo_value = 0.0
-        self.roll_servo.value = 0.0
         self.last_time = time.time()
         logger.info("Gimbal stabilization ENABLED")
     
