@@ -229,6 +229,81 @@ def test_gimbal():
         print("✓ Test complete. Servos centered.")
 
 
+def test_pitch_calibration():
+    """
+    Interactive pitch servo calibration tool.
+    Helps find the correct value for 45° downward angle.
+    """
+    print("=" * 60)
+    print("🎯 PITCH SERVO CALIBRATION MODE")
+    print("=" * 60)
+    print("This tool helps you find the correct pitch servo value.")
+    print()
+    
+    # Convert pulse widths from microseconds to seconds
+    servo_min = config.GIMBAL_SERVO_MIN_PULSE / 1_000_000
+    servo_max = config.GIMBAL_SERVO_MAX_PULSE / 1_000_000
+    
+    # Initialize only pitch servo
+    pitch_servo = Servo(
+        config.GIMBAL_PITCH_PIN,
+        min_pulse_width=servo_min,
+        max_pulse_width=servo_max
+    )
+    
+    print(f"Pitch servo initialized on GPIO {config.GIMBAL_PITCH_PIN}")
+    print()
+    print("Commands:")
+    print("  Enter a value between -1.0 and +1.0")
+    print("  'q' to quit")
+    print()
+    print("Typical values:")
+    print("  -1.0 = Maximum down")
+    print("  -0.5 = 45° down (typical)")
+    print("   0.0 = Center (90°)")
+    print("  +0.5 = 45° up")
+    print("  +1.0 = Maximum up")
+    print("=" * 60)
+    
+    try:
+        # Start at current config value
+        current_value = config.GIMBAL_PITCH_FIXED_POSITION
+        pitch_servo.value = current_value
+        print(f"\nCurrent value: {current_value:+.2f}")
+        
+        while True:
+            user_input = input("\nEnter servo value (-1.0 to +1.0): ").strip()
+            
+            if user_input.lower() == 'q':
+                break
+            
+            try:
+                value = float(user_input)
+                if -1.0 <= value <= 1.0:
+                    pitch_servo.value = value
+                    print(f"✓ Pitch servo set to: {value:+.2f}")
+                    print(f"  Update config.py: GIMBAL_PITCH_FIXED_POSITION = {value}")
+                else:
+                    print("⚠ Value must be between -1.0 and +1.0")
+            except ValueError:
+                print("⚠ Invalid input. Enter a number or 'q' to quit.")
+    
+    except KeyboardInterrupt:
+        print("\n⚠ Calibration interrupted")
+    
+    finally:
+        print("\nCentering servo...")
+        pitch_servo.value = 0
+        pitch_servo.close()
+        print("✓ Calibration complete.")
+
+
 if __name__ == "__main__":
-    # Run standalone test when executed directly
-    test_gimbal()
+    import sys
+    
+    # Check for calibration mode
+    if len(sys.argv) > 1 and sys.argv[1] == "calibrate":
+        test_pitch_calibration()
+    else:
+        # Run standalone test when executed directly
+        test_gimbal()
