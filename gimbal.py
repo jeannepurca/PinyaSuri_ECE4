@@ -13,17 +13,17 @@ logger = logging.getLogger(__name__)
 
 class CameraGimbal:
     """
-    Camera gimbal with roll stabilization and fixed pitch angle.
+    Camera gimbal with roll stabilization only.
+    Pitch angle is physically fixed at 45° downward.
     Uses complementary filter + PID control for smooth stabilization.
     """
     
-    def __init__(self, roll_pin, pitch_pin, use_mpu6050=True, mpu6050_address=0x68):
+    def __init__(self, roll_pin, use_mpu6050=True, mpu6050_address=0x68):
         """
-        Initialize gimbal servos and IMU
+        Initialize gimbal servo and IMU
         
         Args:
             roll_pin: GPIO pin for roll servo
-            pitch_pin: GPIO pin for pitch servo
             use_mpu6050: Use MPU6050 IMU for stabilization
             mpu6050_address: I2C address of MPU6050
         """
@@ -34,21 +34,12 @@ class CameraGimbal:
         servo_min = config.GIMBAL_SERVO_MIN_PULSE / 1_000_000
         servo_max = config.GIMBAL_SERVO_MAX_PULSE / 1_000_000
         
-        # Initialize servos
+        # Initialize roll servo only
         self.roll_servo = Servo(
             roll_pin, 
             min_pulse_width=servo_min, 
             max_pulse_width=servo_max
         )
-        self.pitch_servo = Servo(
-            pitch_pin,
-            min_pulse_width=servo_min,
-            max_pulse_width=servo_max
-        )
-        
-        # Set pitch to fixed 45° downward position
-        self.pitch_servo.value = config.GIMBAL_PITCH_FIXED_POSITION
-        logger.info(f"Pitch servo set to fixed position: {config.GIMBAL_PITCH_FIXED_POSITION}")
         
         # Initialize MPU6050 if enabled
         self.imu = None
@@ -71,7 +62,7 @@ class CameraGimbal:
         # Maximum roll correction angle (degrees)
         self.max_roll_angle = 20.0
         
-        logger.info("Gimbal initialized - Roll stabilization ACTIVE, Pitch FIXED at 45°")
+        logger.info("Gimbal initialized - Roll stabilization ACTIVE (pitch is physically fixed)")
     
     def _clamp(self, value, min_val, max_val):
         """Clamp value between min and max"""
@@ -87,13 +78,12 @@ class CameraGimbal:
         angle = self._clamp(angle, -max_angle, max_angle)
         return angle / max_angle
     
-    def update(self, drone_roll=None, drone_pitch=None):
+    def update(self, drone_roll=None):
         """
         Update gimbal stabilization
         
         Args:
             drone_roll: Drone's roll angle (degrees) - used if MPU6050 unavailable
-            drone_pitch: Drone's pitch angle (degrees) - ignored (pitch is fixed)
         """
         if not self.enabled:
             return
@@ -157,17 +147,15 @@ class CameraGimbal:
         logger.info("Gimbal stabilization ENABLED")
     
     def disable(self):
-        """Disable gimbal stabilization and center servos"""
+        """Disable gimbal stabilization and center servo"""
         self.enabled = False
         self.roll_servo.value = 0  # Center roll
-        self.pitch_servo.value = config.GIMBAL_PITCH_FIXED_POSITION  # Keep pitch fixed
-        logger.info("Gimbal stabilization DISABLED - servos centered")
+        logger.info("Gimbal stabilization DISABLED - servo centered")
     
     def cleanup(self):
         """Clean up resources"""
         self.disable()
         self.roll_servo.close()
-        self.pitch_servo.close()
         logger.info("Gimbal cleanup complete")
 
 
@@ -185,16 +173,15 @@ def test_gimbal():
     print("=" * 60)
     print("Initializing gimbal system...")
     
-    # Initialize gimbal
+    # Initialize gimbal (roll only)
     gimbal = CameraGimbal(
         roll_pin=config.GIMBAL_ROLL_PIN,
-        pitch_pin=config.GIMBAL_PITCH_PIN,
         use_mpu6050=config.USE_MPU6050,
         mpu6050_address=config.MPU6050_I2C_ADDRESS
     )
     
     print(f"✓ Roll servo on GPIO {config.GIMBAL_ROLL_PIN}")
-    print(f"✓ Pitch servo on GPIO {config.GIMBAL_PITCH_PIN} (FIXED at 45°)")
+    print(f"✓ Pitch: Physically fixed at 45° downward")
     print(f"✓ MPU6050 at 0x{config.MPU6050_I2C_ADDRESS:02X}")
     print(f"✓ Update rate: 50 Hz")
     print(f"✓ PID gains: Kp={config.GIMBAL_PID_KP}, Ki={config.GIMBAL_PID_KI}, Kd={config.GIMBAL_PID_KD}")
@@ -226,84 +213,9 @@ def test_gimbal():
     finally:
         print("Cleaning up...")
         gimbal.cleanup()
-        print("✓ Test complete. Servos centered.")
-
-
-def test_pitch_calibration():
-    """
-    Interactive pitch servo calibration tool.
-    Helps find the correct value for 45° downward angle.
-    """
-    print("=" * 60)
-    print("🎯 PITCH SERVO CALIBRATION MODE")
-    print("=" * 60)
-    print("This tool helps you find the correct pitch servo value.")
-    print()
-    
-    # Convert pulse widths from microseconds to seconds
-    servo_min = config.GIMBAL_SERVO_MIN_PULSE / 1_000_000
-    servo_max = config.GIMBAL_SERVO_MAX_PULSE / 1_000_000
-    
-    # Initialize only pitch servo
-    pitch_servo = Servo(
-        config.GIMBAL_PITCH_PIN,
-        min_pulse_width=servo_min,
-        max_pulse_width=servo_max
-    )
-    
-    print(f"Pitch servo initialized on GPIO {config.GIMBAL_PITCH_PIN}")
-    print()
-    print("Commands:")
-    print("  Enter a value between -1.0 and +1.0")
-    print("  'q' to quit")
-    print()
-    print("Typical values:")
-    print("  -1.0 = Maximum down")
-    print("  -0.5 = 45° down (typical)")
-    print("   0.0 = Center (90°)")
-    print("  +0.5 = 45° up")
-    print("  +1.0 = Maximum up")
-    print("=" * 60)
-    
-    try:
-        # Start at current config value
-        current_value = config.GIMBAL_PITCH_FIXED_POSITION
-        pitch_servo.value = current_value
-        print(f"\nCurrent value: {current_value:+.2f}")
-        
-        while True:
-            user_input = input("\nEnter servo value (-1.0 to +1.0): ").strip()
-            
-            if user_input.lower() == 'q':
-                break
-            
-            try:
-                value = float(user_input)
-                if -1.0 <= value <= 1.0:
-                    pitch_servo.value = value
-                    print(f"✓ Pitch servo set to: {value:+.2f}")
-                    print(f"  Update config.py: GIMBAL_PITCH_FIXED_POSITION = {value}")
-                else:
-                    print("⚠ Value must be between -1.0 and +1.0")
-            except ValueError:
-                print("⚠ Invalid input. Enter a number or 'q' to quit.")
-    
-    except KeyboardInterrupt:
-        print("\n⚠ Calibration interrupted")
-    
-    finally:
-        print("\nCentering servo...")
-        pitch_servo.value = 0
-        pitch_servo.close()
-        print("✓ Calibration complete.")
+        print("✓ Test complete. Servo centered.")
 
 
 if __name__ == "__main__":
-    import sys
-    
-    # Check for calibration mode
-    if len(sys.argv) > 1 and sys.argv[1] == "calibrate":
-        test_pitch_calibration()
-    else:
-        # Run standalone test when executed directly
-        test_gimbal()
+    # Run standalone test when executed directly
+    test_gimbal()

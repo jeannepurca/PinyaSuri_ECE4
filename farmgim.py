@@ -62,7 +62,6 @@ def capture_image():
             print("Initializing gimbal...")
             gimbal = CameraGimbal(
                 roll_pin=config.GIMBAL_ROLL_PIN,
-                pitch_pin=config.GIMBAL_PITCH_PIN,
                 use_mpu6050=config.USE_MPU6050,
                 mpu6050_address=config.MPU6050_I2C_ADDRESS
             )
@@ -77,7 +76,7 @@ def capture_image():
             )
             gimbal_thread.start()
             
-            print("✓ Gimbal stabilization ENABLED (45° downward pitch)")
+            print("✓ Gimbal stabilization ENABLED (roll only, pitch physically fixed at 45°)")
         except Exception as e:
             print(f"⚠ Gimbal initialization failed: {e}")
             print("  Continuing without gimbal stabilization")

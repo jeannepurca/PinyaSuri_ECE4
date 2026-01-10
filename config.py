@@ -115,12 +115,10 @@ MPU6050_CALIBRATION_SAMPLES = 100
 # --- Enable/Disable Gimbal
 GIMBAL_ENABLED = True  # Set to False to disable gimbal
 
-# --- GPIO Pins (BCM numbering)
+# --- GPIO Pin (BCM numbering) - Roll servo only
 GIMBAL_ROLL_PIN = 17   # GPIO 17 for roll stabilization servo
-GIMBAL_PITCH_PIN = 27  # GPIO 27 for pitch angle servo
 
-# --- Gimbal Angles
-GIMBAL_PITCH_FIXED_POSITION = 0.0
+# NOTE: Pitch angle is physically fixed at 45° downward (no servo needed)
 
 # --- Servo Pulse Width (microseconds)
 GIMBAL_SERVO_MIN_PULSE = 500   # 0.5ms (minimum pulse width)

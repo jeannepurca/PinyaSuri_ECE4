@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# main.py - Integrated with gimbal stabilization
+# main.py - Integrated with gimbal stabilization (roll only)
 
 import time
 import csv
@@ -159,7 +159,7 @@ def handle_arm_state_change(pixhawk, metrics, gimbal, was_armed, flight_number, 
         captured_wp.clear()
         pixhawk.clear_waypoint_log()
         
-        # Disable gimbal and center servos
+        # Disable gimbal and center servo
         if gimbal:
             gimbal.disable()
         
@@ -233,7 +233,8 @@ def main_loop(pixhawk, camera, metrics, gimbal, logger):
     logger.info("=" * 60)
     logger.info("🍍 PINYASURI FLIGHT SYSTEM READY! 🚁")
     if gimbal:
-        logger.info("🎥 Gimbal stabilization: ENABLED")
+        logger.info("🎥 Gimbal stabilization: ENABLED (roll only)")
+        logger.info("    Pitch physically fixed at 45° downward")
     logger.info("System will run continuously. Press Ctrl+C to stop.")
     logger.info("=" * 60)
 
@@ -243,12 +244,11 @@ def main_loop(pixhawk, camera, metrics, gimbal, logger):
         
         # Update gimbal stabilization (if enabled)
         if gimbal and gimbal.enabled:
-            # Get current drone attitude
+            # Get current drone roll attitude
             drone_roll = pixhawk.get_roll()
-            drone_pitch = pixhawk.get_pitch()
             
             # Update gimbal to compensate for roll
-            gimbal.update(drone_roll, drone_pitch)
+            gimbal.update(drone_roll)
         
         # Handle arm/disarm state changes
         was_armed, flight_number = handle_arm_state_change(
@@ -319,11 +319,10 @@ def main():
     try:
         gimbal = CameraGimbal(
             roll_pin=config.GIMBAL_ROLL_PIN,
-            pitch_pin=config.GIMBAL_PITCH_PIN,
             use_mpu6050=config.USE_MPU6050,
             mpu6050_address=config.MPU6050_I2C_ADDRESS
         )
-        logger.info("✓ Gimbal initialized successfully")
+        logger.info("✓ Gimbal initialized successfully (roll stabilization only)")
     except Exception as e:
         logger.warning(f"⚠ Gimbal initialization failed: {e}")
         gimbal = None
