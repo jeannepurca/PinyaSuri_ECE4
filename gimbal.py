@@ -90,7 +90,7 @@ class CameraGimbal:
         
         # Calculate delta time
         current_time = time.time()
-        dt = current_time - self.last_time
+        dt = 0.02 # current_time - self.last_time
         self.last_time = current_time
         
         if dt <= 0:
