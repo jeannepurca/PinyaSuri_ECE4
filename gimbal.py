@@ -71,10 +71,10 @@ class CameraGimbal:
         self.max_integral = 5.0  # Was 10.0
         
         # Add deadband threshold
-        self.deadband = 0.5  # degrees
+        self.deadband = 1.0  # degrees
 
         # Servo output smoothing (slew-rate limiting)
-        self.max_servo_speed = 1.2   # servo units per second (tune 0.8–1.5)
+        self.max_servo_speed = 1.0   # servo units per second (tune 0.8–1.5)
         self.last_servo_value = 0.0
         
         logger.info("Gimbal initialized - Roll stabilization ACTIVE (pitch is physically fixed)")

@@ -103,7 +103,7 @@ MPU6050_I2C_ADDRESS = 0x68
 # Higher = more trust in gyroscope (fast, but drifts)
 # Lower = more trust in accelerometer (stable, but noisy)
 # Try 0.96-0.99 if you experience drift
-MPU6050_ALPHA = 0.98
+MPU6050_ALPHA = 0.99
 
 # --- Calibration samples (more = better accuracy, but slower startup)
 # Increase to 200-500 if you see persistent angle errors
@@ -127,9 +127,9 @@ GIMBAL_SERVO_MIN_PULSE = 500   # 0.5ms (minimum pulse width)
 GIMBAL_SERVO_MAX_PULSE = 2500  # 2.5ms (maximum pulse width)
 
 # --- PID Tuning (adjust these based on your servo response)
-GIMBAL_PID_KP = 0.6   # Proportional gain
-GIMBAL_PID_KI = 0.05  # Integral gain
-GIMBAL_PID_KD = 0.01   # Derivative gain
+GIMBAL_PID_KP = 0.7   # Proportional gain
+GIMBAL_PID_KI = 0.04  # Integral gain
+GIMBAL_PID_KD = 0.00   # Derivative gain
 
 
 # ============================================================================
