@@ -142,7 +142,9 @@ class CameraGimbal:
         pitch_derivative = (pitch_error - self.pitch_prev_error) / dt if dt > 0 else 0
         self.pitch_prev_error = pitch_error
         pitch_output = self.kp * pitch_error + self.ki * self.pitch_integral + self.kd * pitch_derivative
-        self.pitch_servo.value = self._angle_to_servo(pitch_output, self.max_roll)
+        
+        # INVERTED: Servo moves opposite to compensate/counteract movement
+        self.pitch_servo.value = -self._angle_to_servo(pitch_output, self.max_roll)
     
     def cleanup(self):
         """Clean up resources"""
@@ -155,13 +157,18 @@ class CameraGimbal:
 # Standalone test mode
 if __name__ == "__main__":
     print("Running gimbal in standalone test mode...")
+    print("Gimbal will maintain 45° downward pitch")
+    print("Tilt the IMU up/down - servo should counteract to maintain angle")
+    
     gimbal = CameraGimbal(use_mpu6050=True)
     gimbal.enable()
     
     try:
         while True:
             gimbal.update()
-            print(f"Roll: {gimbal.roll_angle:6.1f}° | Pitch: {gimbal.pitch_angle:6.1f}° (target: {gimbal.target_pitch}°)")
+            print(f"Roll: {gimbal.roll_angle:6.1f}° | "
+                  f"Pitch: {gimbal.pitch_angle:6.1f}° (target: {gimbal.target_pitch}°) | "
+                  f"Servo: {gimbal.pitch_servo.value:+.2f}")
             time.sleep(0.02)
     except KeyboardInterrupt:
         print("\nStopping...")
