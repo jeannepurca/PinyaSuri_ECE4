@@ -35,7 +35,7 @@ def ensure_directories():
     LOG_DIR.mkdir(exist_ok=True)
     IMAGE_DIR.mkdir(exist_ok=True)
     MODEL_DIR.mkdir(exist_ok=True)
-    JSON_DIR.mkdir( exist_ok=True)
+    JSON_DIR.mkdir(exist_ok=True)
 
 
 # ============================================================================
@@ -87,49 +87,6 @@ MIN_ALTITUDE_FOR_CAPTURE = 2.0
 MAIN_LOOP_INTERVAL = 0.1  # seconds
 METRICS_LOG_INTERVAL = 0.5  # seconds
 METRICS_WINDOW_SIZE = 10
-
-
-# ============================================================================
-# MPU6050 IMU SENSOR CONFIGURATION
-# ============================================================================
-
-# ---Enable/Disable MPU6050 (falls back to Pixhawk if False)
-USE_MPU6050 = True
-
-# --- I2C Address (0x68 if AD0 pin is LOW, 0x69 if HIGH)
-MPU6050_I2C_ADDRESS = 0x68
-
-# --- Complementary filter coefficient (0.90-0.98 recommended)
-# Higher = more trust in gyroscope (fast, but drifts)
-# Lower = more trust in accelerometer (stable, but noisy)
-# Try 0.96-0.99 if you experience drift
-MPU6050_ALPHA = 0.98
-
-# --- Calibration samples (more = better accuracy, but slower startup)
-# Increase to 200-500 if you see persistent angle errors
-MPU6050_CALIBRATION_SAMPLES = 100
-
-
-# ============================================================================
-# GIMBAL CONFIGURATION
-# ============================================================================
-
-# --- Enable/Disable Gimbal
-GIMBAL_ENABLED = True  # Set to False to disable gimbal
-
-# --- GPIO Pin (BCM numbering) - Roll servo only
-GIMBAL_ROLL_PIN = 17   # GPIO 17 for roll stabilization servo
-
-# NOTE: Pitch angle is physically fixed at 45° downward (no servo needed)
-
-# --- Servo Pulse Width (microseconds)
-GIMBAL_SERVO_MIN_PULSE = 500   # 0.5ms (minimum pulse width)
-GIMBAL_SERVO_MAX_PULSE = 2500  # 2.5ms (maximum pulse width)
-
-# --- PID Tuning (adjust these based on your servo response)
-GIMBAL_PID_KP = 0.6   # Proportional gain
-GIMBAL_PID_KI = 0.03  # Integral gain
-GIMBAL_PID_KD = 0.01   # Derivative gain
 
 
 # ============================================================================

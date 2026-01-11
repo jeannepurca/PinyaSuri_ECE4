@@ -1,16 +1,14 @@
 #!/usr/bin/env python3
-# main.py
+# main.py - Gimbal removed
 
 import time
 import csv
 import logging
 import sys
-import threading
 
 import config
 from logging_config import setup_logging
 from pixhawk import Pixhawk
-from gimbal import CameraGimbal
 from camera import Camera
 from metrics import FlightMetrics
 
@@ -136,20 +134,16 @@ def get_telemetry_dict(pixhawk):
         "battery_remaining": pixhawk.battery_remaining
     }
 
-def handle_arm_state_change(pixhawk, metrics, gimbal, was_armed, flight_number, captured_wp, logger):
+def handle_arm_state_change(pixhawk, metrics, was_armed, flight_number, captured_wp, logger):
     """Detect and handle arm/disarm transitions"""
     if pixhawk.armed and not was_armed:
         # Just armed
         logger.info("=" * 60)
         logger.info(f"🛫 FLIGHT #{flight_number} - DRONE ARMED")
-        logger.info("   Mission monitoring started.  ")
+        logger.info("   Mission monitoring started.")
         logger.info("=" * 60)
         metrics.start_flight(True, pixhawk.battery_remaining)
-        pixhawk.clear_waypoint_log()  # Clear old waypoint logs
-        
-        # Enable gimbal stabilization
-        if gimbal:
-            gimbal.enable()
+        pixhawk.clear_waypoint_log()
         
         return True, flight_number
         
@@ -159,10 +153,6 @@ def handle_arm_state_change(pixhawk, metrics, gimbal, was_armed, flight_number, 
         metrics.end_flight(True)
         captured_wp.clear()
         pixhawk.clear_waypoint_log()
-        
-        # Disable gimbal and center servo
-        if gimbal:
-            gimbal.disable()
         
         return False, flight_number + 1
     
@@ -204,19 +194,16 @@ def should_capture_image(pixhawk, waypoint, captured_wp, logger):
         return False
     
     # 7. RELAXED hover detection for outdoor conditions
-    # Mission Planner holds for 10s, so we can be more forgiving
-    if not pixhawk.is_hovering(threshold=0.6):  # Relaxed for wind
+    if not pixhawk.is_hovering(threshold=0.6):
         logger.debug(f"⚠ Still moving at {pixhawk.groundspeed:.2f} m/s")
         return False
     
     # 8. RELAXED altitude stability check
-    # More forgiving since Mission Planner handles the hover
-    if not pixhawk.is_altitude_stable(threshold=0.8, window_size=5):  # Very forgiving
+    if not pixhawk.is_altitude_stable(threshold=0.8, window_size=5):
         logger.debug(f"⚠ Altitude not stable: {pixhawk.get_altitude_variation():.2f} m variation")
         return False
     
     # 9. Verify waypoint was actually reached
-    # Check if we received the MISSION_ITEM_REACHED event for this waypoint
     if waypoint not in pixhawk.wp_reached_log:
         logger.debug(f"⚠ {config.get_waypoint_name(waypoint)} not confirmed reached yet")
         return False
@@ -225,24 +212,7 @@ def should_capture_image(pixhawk, waypoint, captured_wp, logger):
     logger.info(f"✓ All capture conditions met for {config.get_waypoint_name(waypoint)}!")
     return True
 
-def run_gimbal_stabilization(gimbal, logger):
-    """
-    Dedicated thread for gimbal stabilization at 50Hz.
-    Runs continuously - gimbal.update() handles enabled state internally.
-    """
-    logger.info("🎥 Gimbal thread started at 50Hz")
-    
-    while running:
-        try:
-            gimbal.update()  # Internal check for enabled state
-            time.sleep(0.02)  # 50Hz update rate
-        except Exception as e:
-            logger.error(f"⚠ Gimbal thread error: {e}")
-            time.sleep(0.1)  # Prevent rapid error spam
-    
-    logger.info("🎥 Gimbal thread stopped")
-
-def main_loop(pixhawk, camera, metrics, gimbal, logger):
+def main_loop(pixhawk, camera, metrics, logger):
     captured_wp = set()
     flight_number = 1
     was_armed = False
@@ -250,10 +220,6 @@ def main_loop(pixhawk, camera, metrics, gimbal, logger):
     
     logger.info("=" * 60)
     logger.info("🍍 PINYASURI FLIGHT SYSTEM READY! 🚁")
-    if gimbal:
-        logger.info("🎥 Gimbal stabilization: ENABLED (roll only)")
-        logger.info("    Pitch physically fixed at 45° downward")
-        logger.info("    Running in dedicated 50Hz thread")
     logger.info("System will run continuously. Press Ctrl+C to stop.")
     logger.info("=" * 60)
 
@@ -261,11 +227,9 @@ def main_loop(pixhawk, camera, metrics, gimbal, logger):
         # Update pixhawk telemetry
         pixhawk.update()
         
-        # NOTE: Gimbal updates handled by dedicated thread - don't call here!
-        
         # Handle arm/disarm state changes
         was_armed, flight_number = handle_arm_state_change(
-            pixhawk, metrics, gimbal, was_armed, flight_number, captured_wp, logger
+            pixhawk, metrics, was_armed, flight_number, captured_wp, logger
         )
 
         # Check for flight mode changes
@@ -290,7 +254,7 @@ def main_loop(pixhawk, camera, metrics, gimbal, logger):
     
     return was_armed
 
-def cleanup(camera, metrics, gimbal, was_armed, logger):
+def cleanup(camera, metrics, was_armed, logger):
     """Clean up resources before exit"""
     logger.info("=" * 60)
     logger.info("⚠ INITIATING SHUTDOWN ⚠")
@@ -300,13 +264,6 @@ def cleanup(camera, metrics, gimbal, was_armed, logger):
     if was_armed:
         logger.info(">>> Finalizing flight metrics...")
         metrics.end_flight(True)
-
-    # Cleanup gimbal
-    if gimbal:
-        try:
-            gimbal.cleanup()
-        except Exception as e:
-            logger.warning(f"⚠ Error cleaning up gimbal: {e}")
 
     # Cleanup camera
     try:
@@ -326,31 +283,6 @@ def main():
     pixhawk = Pixhawk()
     camera = Camera()
     metrics = FlightMetrics()
-    
-    # Initialize gimbal (optional - set to None to disable)
-    gimbal = None
-    gimbal_thread_obj = None  # ← Fixed: Different variable name
-    
-    try:
-        gimbal = CameraGimbal(
-            roll_pin=config.GIMBAL_ROLL_PIN,
-            use_mpu6050=config.USE_MPU6050,
-            mpu6050_address=config.MPU6050_I2C_ADDRESS
-        )
-        logger.info("✓ Gimbal initialized successfully (roll stabilization only)")
-        
-        # Start gimbal thread
-        gimbal_thread_obj = threading.Thread(
-            target=run_gimbal_stabilization,  # ← Fixed: Different function name
-            args=(gimbal, logger),
-            daemon=True,
-            name="GimbalThread"
-        )
-        gimbal_thread_obj.start()
-        
-    except Exception as e:
-        logger.warning(f"⚠ Gimbal initialization failed: {e}")
-        gimbal = None
 
     logger.info("=" * 60)
     logger.info("🍍 PINYASURI FLIGHT SYSTEM 🚁")
@@ -362,14 +294,13 @@ def main():
         initialize_csv()
         
         # Run main loop
-        was_armed = main_loop(pixhawk, camera, metrics, gimbal, logger)
+        was_armed = main_loop(pixhawk, camera, metrics, logger)
         
     except KeyboardInterrupt:
         logger.info("")
         logger.info("=" * 60)
         logger.info("⚠ MANUAL STOP - Interrupted by user! ⚠")
         logger.info("=" * 60)
-        running = False
 
         time.sleep(0.5)
         was_armed = pixhawk.armed if pixhawk else False
@@ -377,7 +308,7 @@ def main():
         logger.error(f"⚠ Fatal error: {e} ⚠", exc_info=True)
         was_armed = False
     finally:
-        cleanup(camera, metrics, gimbal, was_armed, logger)
+        cleanup(camera, metrics, was_armed, logger)
 
 if __name__ == "__main__":
     main()
