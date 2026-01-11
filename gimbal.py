@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# gimbal.py - Debug version to identify jitter source
+# gimbal.py - Optimized with reduced IMU read frequency
 
 import time
 import math
@@ -19,10 +19,9 @@ class CameraGimbal:
         self.use_mpu6050 = use_mpu6050
         self.enabled = False
         
-        # Performance tracking
-        self.update_count = 0
-        self.slow_updates = 0
-        self.imu_errors = 0
+        # IMU read rate limiting (read every N updates)
+        self.imu_update_interval = 2  # Read IMU every 2 updates (25Hz instead of 50Hz)
+        self.update_counter = 0
         
         # Convert pulse widths from microseconds to seconds
         servo_min = config.GIMBAL_SERVO_MIN_PULSE / 1_000_000
@@ -52,6 +51,11 @@ class CameraGimbal:
         # Complementary filter state
         self.roll_angle = 0.0
         self.last_time = time.time()
+        self.last_imu_time = time.time()
+        
+        # Cached IMU values (used between reads)
+        self.last_gyro_x = 0.0
+        self.last_accel_roll = 0.0
         
         # Maximum roll correction angle
         self.max_roll_angle = 45.0
@@ -79,59 +83,50 @@ class CameraGimbal:
     
     def update(self):
         """
-        Update gimbal stabilization with performance monitoring
+        Update gimbal stabilization
+        Only reads IMU every N cycles to reduce I2C overhead
         """
         if not self.enabled:
             return
-        
-        update_start = time.time()
         
         # Calculate ACTUAL delta time
         current_time = time.time()
         dt = current_time - self.last_time
         self.last_time = current_time
         
-        # Track performance
-        self.update_count += 1
-        
         # Sanity check: reject unrealistic dt values
         if dt <= 0 or dt > 0.1:
-            logger.warning(f"⚠ INVALID dt: {dt:.4f}s - Skipping update #{self.update_count}")
+            logger.debug(f"Skipping update - invalid dt: {dt}")
             return
         
-        # Warn about slow updates (>30ms = <33Hz)
-        if dt > 0.030:
-            self.slow_updates += 1
-            if self.slow_updates % 10 == 0:
-                logger.warning(f"⚠ Slow update rate: {1/dt:.1f}Hz (dt={dt*1000:.1f}ms) - Count: {self.slow_updates}")
-        
-        if self.use_mpu6050 and self.imu:
-            imu_start = time.time()
-            try:
-                # Read IMU data
-                accel = self.imu.get_accel_data()
-                gyro = self.imu.get_gyro_data()
-                
-                imu_duration = (time.time() - imu_start) * 1000  # ms
-                
-                # Warn about slow I2C reads
-                if imu_duration > 5.0:
-                    logger.warning(f"⚠ Slow IMU read: {imu_duration:.1f}ms")
-                
-                # Calculate roll from accelerometer
-                accel_roll = self._accel_to_roll(accel)
-                
-                # Complementary filter
-                self.roll_angle = (
-                    config.MPU6050_ALPHA * (self.roll_angle + gyro["x"] * dt) + 
-                    (1 - config.MPU6050_ALPHA) * accel_roll
-                )
+        # Only read IMU periodically (not every update)
+        self.update_counter += 1
+        if self.update_counter >= self.imu_update_interval:
+            self.update_counter = 0
+            
+            if self.use_mpu6050 and self.imu:
+                try:
+                    # Read IMU data
+                    accel = self.imu.get_accel_data()
+                    gyro = self.imu.get_gyro_data()
+                    
+                    # Cache values
+                    self.last_gyro_x = gyro["x"]
+                    self.last_accel_roll = self._accel_to_roll(accel)
+                    self.last_imu_time = current_time
 
-            except Exception as e:
-                self.imu_errors += 1
-                if self.imu_errors % 10 == 0:
-                    logger.error(f"⚠ IMU read error #{self.imu_errors}: {e}")
-                return
+                except Exception as e:
+                    logger.debug(f"IMU read error: {e}")
+                    # Continue with last known values
+        
+        # Calculate dt since last IMU read
+        imu_dt = current_time - self.last_imu_time
+        
+        # Complementary filter using cached IMU values
+        self.roll_angle = (
+            config.MPU6050_ALPHA * (self.roll_angle + self.last_gyro_x * dt) + 
+            (1 - config.MPU6050_ALPHA) * self.last_accel_roll
+        )
 
         # PID control for roll stabilization
         roll_error = -self.roll_angle
@@ -160,24 +155,7 @@ class CameraGimbal:
         )
 
         # Apply to servo
-        servo_start = time.time()
         self.roll_servo.value = self._angle_to_servo(roll_output, self.max_roll_angle)
-        servo_duration = (time.time() - servo_start) * 1000  # ms
-        
-        # Warn about slow servo writes
-        if servo_duration > 5.0:
-            logger.warning(f"⚠ Slow servo write: {servo_duration:.1f}ms")
-        
-        # Total update time
-        total_duration = (time.time() - update_start) * 1000  # ms
-        
-        # Print diagnostics every 100 updates
-        if self.update_count % 100 == 0:
-            logger.info(f"📊 Stats (last 100 updates): "
-                       f"Avg rate: {1/dt:.1f}Hz | "
-                       f"Slow updates: {self.slow_updates} | "
-                       f"IMU errors: {self.imu_errors} | "
-                       f"Update time: {total_duration:.1f}ms")
     
     def enable(self):
         """Enable gimbal stabilization"""
@@ -185,25 +163,14 @@ class CameraGimbal:
         self.roll_integral = 0
         self.roll_prev_error = 0
         self.last_time = time.time()
-        
-        # Reset diagnostics
-        self.update_count = 0
-        self.slow_updates = 0
-        self.imu_errors = 0
-        
+        self.last_imu_time = time.time()
+        self.update_counter = 0
         logger.info("Gimbal stabilization ENABLED")
     
     def disable(self):
         """Disable gimbal stabilization and center servo"""
         self.enabled = False
         self.roll_servo.value = 0
-        
-        # Print final statistics
-        if self.update_count > 0:
-            logger.info(f"📊 Final Stats: Total updates: {self.update_count} | "
-                       f"Slow: {self.slow_updates} ({100*self.slow_updates/self.update_count:.1f}%) | "
-                       f"IMU errors: {self.imu_errors}")
-        
         logger.info("Gimbal stabilization DISABLED - servo centered")
     
     def cleanup(self):
@@ -222,7 +189,7 @@ def test_gimbal():
     Standalone test mode for gimbal stabilization.
     """
     print("=" * 60)
-    print("🎥 GIMBAL STANDALONE TEST MODE (DEBUG)")
+    print("🎥 GIMBAL STANDALONE TEST MODE (OPTIMIZED)")
     print("=" * 60)
     print("Initializing gimbal system...")
     
@@ -235,11 +202,11 @@ def test_gimbal():
     print(f"✓ Roll servo on GPIO {config.GIMBAL_ROLL_PIN}")
     print(f"✓ Pitch: Physically fixed at 45° downward")
     print(f"✓ MPU6050 at 0x{config.MPU6050_I2C_ADDRESS:02X}")
-    print(f"✓ Update rate: 50 Hz")
+    print(f"✓ Servo update rate: 50 Hz")
+    print(f"✓ IMU read rate: {50/gimbal.imu_update_interval:.0f} Hz")
     print(f"✓ PID gains: Kp={config.GIMBAL_PID_KP}, Ki={config.GIMBAL_PID_KI}, Kd={config.GIMBAL_PID_KD}")
     print("=" * 60)
     print("Gimbal stabilization starting... Tilt the IMU!")
-    print("Performance diagnostics will show every 100 updates")
     print("Press Ctrl+C to stop")
     print("=" * 60)
     
@@ -248,6 +215,13 @@ def test_gimbal():
     try:
         while True:
             gimbal.update()
+            
+            # Print current state occasionally
+            if gimbal.update_counter == 0:  # Only when IMU was just read
+                print(f"Roll: {gimbal.roll_angle:6.1f}° | "
+                      f"Servo: {gimbal.roll_servo.value:+.3f} | "
+                      f"Integral: {gimbal.roll_integral:6.2f}")
+            
             time.sleep(0.02)  # 50 Hz
             
     except KeyboardInterrupt:
