@@ -19,11 +19,8 @@ class CameraGimbal:
         self.use_mpu6050 = use_mpu6050
         self.enabled = False
         
-        # Add filtered sensor values
-        self.filtered_gyro_x = 0.0
-        self.filtered_accel_roll = 0.0
-        self.filter_alpha = 0.05  # Lower = smoother but slower response
-
+        # REMOVED: Separate sensor filtering (complementary filter handles this)
+        
         # Convert pulse widths from microseconds to seconds
         servo_min = config.GIMBAL_SERVO_MIN_PULSE / 1_000_000
         servo_max = config.GIMBAL_SERVO_MAX_PULSE / 1_000_000
@@ -53,20 +50,16 @@ class CameraGimbal:
         self.roll_angle = 0.0
         self.last_time = time.time()
         
-        # INCREASE maximum roll correction angle
-        self.max_roll_angle = 45.0  # Was 20.0 - increase servo authority
+        # Maximum roll correction angle
+        self.max_roll_angle = 45.0
         
-        # Reduce integral limit to prevent aggressive windup
-        self.max_integral = 5.0  # Was 10.0
+        # Integral limit
+        self.max_integral = 5.0
         
-        # Add deadband threshold
+        # Deadband threshold
         self.deadband = 0.5  # degrees
 
         logger.info("Gimbal initialized - Roll stabilization ACTIVE (pitch is physically fixed)")
-
-    def _low_pass_filter(self, new_value, old_value, alpha):
-        """Simple low-pass filter"""
-        return alpha * new_value + (1 - alpha) * old_value
 
     def _clamp(self, value, min_val, max_val):
         """Clamp value between min and max"""
@@ -88,12 +81,14 @@ class CameraGimbal:
         if not self.enabled:
             return
         
-        # Calculate delta time
+        # Calculate ACTUAL delta time
         current_time = time.time()
-        dt = 0.02 # current_time - self.last_time
+        dt = current_time - self.last_time
         self.last_time = current_time
         
-        if dt <= 0:
+        # Sanity check: reject unrealistic dt values
+        if dt <= 0 or dt > 0.1:
+            logger.debug(f"Skipping update - invalid dt: {dt}")
             return
         
         if self.use_mpu6050 and self.imu:
@@ -105,23 +100,11 @@ class CameraGimbal:
                 # Calculate roll from accelerometer
                 accel_roll = self._accel_to_roll(accel)
                 
-                # Low-pass filter raw sensor readings
-                self.filtered_gyro_x = self._low_pass_filter(
-                    gyro["x"], self.filtered_gyro_x, self.filter_alpha
+                # Complementary filter (NO additional filtering needed)
+                self.roll_angle = (
+                    config.MPU6050_ALPHA * (self.roll_angle + gyro["x"] * dt) + 
+                    (1 - config.MPU6050_ALPHA) * accel_roll
                 )
-                
-                self.filtered_accel_roll = self._low_pass_filter(
-                    accel_roll, self.filtered_accel_roll, self.filter_alpha
-                )
-                
-                # Complementary filter
-                roll_angle_new = (
-                    config.MPU6050_ALPHA * (self.roll_angle + self.filtered_gyro_x * dt) + 
-                    (1 - config.MPU6050_ALPHA) * self.filtered_accel_roll
-                )
-
-                # ADDITIONAL LOW-PASS FILTER on final roll angle
-                self.roll_angle = self._low_pass_filter(roll_angle_new, self.roll_angle, self.filter_alpha)
 
             except Exception as e:
                 logger.debug(f"IMU read error: {e}")
@@ -133,7 +116,7 @@ class CameraGimbal:
         # Apply deadband
         if abs(roll_error) < self.deadband:
             roll_error = 0
-            self.roll_integral *= 0.95
+            self.roll_integral *= 0.95  # Decay integral when in deadband
 
         # Anti-windup integral
         self.roll_integral = self._clamp(
@@ -142,8 +125,8 @@ class CameraGimbal:
             self.max_integral
         )
 
-        # Derivative
-        roll_derivative = (roll_error - self.roll_prev_error) / dt if roll_error != 0 else 0
+        # Derivative (no special case needed)
+        roll_derivative = (roll_error - self.roll_prev_error) / dt
         self.roll_prev_error = roll_error
 
         # PID output
@@ -162,7 +145,7 @@ class CameraGimbal:
         self.enabled = True
         self.roll_integral = 0
         self.roll_prev_error = 0
-        self.last_time = time.time()
+        self.last_time = time.time()  # Reset timing
         logger.info("Gimbal stabilization ENABLED")
     
     def disable(self):
@@ -214,7 +197,6 @@ def test_gimbal():
     
     try:
         while True:
-            # Update gimbal (no drone data in test mode, uses only IMU)
             gimbal.update()
             
             # Print current state
@@ -236,5 +218,4 @@ def test_gimbal():
 
 
 if __name__ == "__main__":
-    # Run standalone test when executed directly
     test_gimbal()

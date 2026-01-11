@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-# main.py - Integrated with gimbal stabilization (roll only)
+# main.py
 
 import time
 import csv
 import logging
 import sys
+import threading
 
 import config
 from logging_config import setup_logging
@@ -224,6 +225,23 @@ def should_capture_image(pixhawk, waypoint, captured_wp, logger):
     logger.info(f"✓ All capture conditions met for {config.get_waypoint_name(waypoint)}!")
     return True
 
+def run_gimbal_stabilization(gimbal, logger):
+    """
+    Dedicated thread for gimbal stabilization at 50Hz.
+    Runs continuously - gimbal.update() handles enabled state internally.
+    """
+    logger.info("🎥 Gimbal thread started at 50Hz")
+    
+    while running:
+        try:
+            gimbal.update()  # Internal check for enabled state
+            time.sleep(0.02)  # 50Hz update rate
+        except Exception as e:
+            logger.error(f"⚠ Gimbal thread error: {e}")
+            time.sleep(0.1)  # Prevent rapid error spam
+    
+    logger.info("🎥 Gimbal thread stopped")
+
 def main_loop(pixhawk, camera, metrics, gimbal, logger):
     captured_wp = set()
     flight_number = 1
@@ -235,6 +253,7 @@ def main_loop(pixhawk, camera, metrics, gimbal, logger):
     if gimbal:
         logger.info("🎥 Gimbal stabilization: ENABLED (roll only)")
         logger.info("    Pitch physically fixed at 45° downward")
+        logger.info("    Running in dedicated 50Hz thread")
     logger.info("System will run continuously. Press Ctrl+C to stop.")
     logger.info("=" * 60)
 
@@ -242,9 +261,7 @@ def main_loop(pixhawk, camera, metrics, gimbal, logger):
         # Update pixhawk telemetry
         pixhawk.update()
         
-        # Update gimbal stabilization (if enabled)
-        if gimbal and gimbal.enabled:
-            gimbal.update()
+        # NOTE: Gimbal updates handled by dedicated thread - don't call here!
         
         # Handle arm/disarm state changes
         was_armed, flight_number = handle_arm_state_change(
@@ -312,6 +329,8 @@ def main():
     
     # Initialize gimbal (optional - set to None to disable)
     gimbal = None
+    gimbal_thread_obj = None  # ← Fixed: Different variable name
+    
     try:
         gimbal = CameraGimbal(
             roll_pin=config.GIMBAL_ROLL_PIN,
@@ -319,6 +338,16 @@ def main():
             mpu6050_address=config.MPU6050_I2C_ADDRESS
         )
         logger.info("✓ Gimbal initialized successfully (roll stabilization only)")
+        
+        # Start gimbal thread
+        gimbal_thread_obj = threading.Thread(
+            target=run_gimbal_stabilization,  # ← Fixed: Different function name
+            args=(gimbal, logger),
+            daemon=True,
+            name="GimbalThread"
+        )
+        gimbal_thread_obj.start()
+        
     except Exception as e:
         logger.warning(f"⚠ Gimbal initialization failed: {e}")
         gimbal = None
