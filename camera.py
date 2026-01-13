@@ -5,17 +5,13 @@ import logging
 import pathlib
 from datetime import datetime
 from picamera2 import Picamera2
+import config
 
 logger = logging.getLogger(__name__)
 
 class Camera:
-    def __init__(self, output_dir=None):
-        if output_dir is None:
-            import config
-            output_dir = str(config.IMAGE_DIR)
-
-        self.output_dir = pathlib.Path(output_dir)
-        self.output_dir.mkdir(parents=True, exist_ok=True)
+    def __init__(self):
+        config.ensure_directories()
 
         try:
             from picamera2 import Picamera2
@@ -30,22 +26,21 @@ class Camera:
 
     # Capture Image and Save to File
     def capture(self, waypoint: int, flight_number: int = 1, prefix="img"):
-        # Current date folder
-        date_str = datetime.utcnow().strftime("%Y%m%d")  # YYYYMMDD format
-        date_folder = self.output_dir / date_str
-        date_folder.mkdir(parents=True, exist_ok=True)
+        """Capture image and save to today's date folder"""
+        # Get today's folder
+        date_folder = config.get_image_day_dir()
 
         # Timestamp for filename
         ts = datetime.utcnow().strftime("%Y%m%dT%H%M%S%f")[:-3]
-        
         filename = f"{prefix}_flight{flight_number}_wp{waypoint}_{ts}.jpg"
         fullpath = date_folder / filename
 
         # Capture the image
         self.picam2.capture_file(str(fullpath))
+        logger.info(f"✓ Captured {filename} in folder {date_folder.name}")
 
-        logger.info(f"✓ Captured {filename}")
-        return str(filename)
+        # Return full path as string
+        return str(fullpath)
 
     def close(self):
         try:

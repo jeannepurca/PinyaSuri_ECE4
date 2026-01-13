@@ -1,31 +1,45 @@
 #!/usr/bin/env python3
-# main.py - Gimbal removed
+# main.py
 
 import time
 import csv
 import logging
 import sys
-
 import config
 from logging_config import setup_logging
 from pixhawk import Pixhawk
 from camera import Camera
-from metrics import FlightMetrics
+from metrics import get_next_daily_flight_number
+from metrics import FlightMetricsLogger
 
 running = True
 
+# ----------------------------
+# CSV Initialization
+# ----------------------------
 def initialize_csv():
-    """Create image log CSV with headers"""
-    with open(config.IMAGE_LOG_CSV, "w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(["timestamp", "flight", "waypoint", "lat", "lon", "rel_alt", "image"])
+    """Create image log CSV with headers if file doesn't exist"""
+    if not config.IMAGE_LOG_CSV.exists():
+        with open(config.IMAGE_LOG_CSV, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                "timestamp",
+                "flight_id",
+                "flight_number",
+                "waypoint",
+                "lat_deg",
+                "lon_deg",
+                "rel_alt_m",
+                "image_path"
+            ])
 
-def log_image_capture(flight_number, waypoint, position, image_path):
-    """Write image capture data to CSV"""
+def log_image_capture(flight_id, flight_number, waypoint, position, image_path):
+    """Append image capture record to CSV"""
     with open(config.IMAGE_LOG_CSV, "a", newline="") as f:
         writer = csv.writer(f)
         writer.writerow([
             time.time(),
+            flight_id,
             flight_number,
             waypoint,
             position["lat"],
@@ -34,22 +48,25 @@ def log_image_capture(flight_number, waypoint, position, image_path):
             image_path
         ])
 
+# ----------------------------
+# Capture handler
+# ----------------------------
 def handle_waypoint_capture(pixhawk, camera, metrics, waypoint, flight_number, captured_wp, logger):
     """Capture image at waypoint and log data"""
-
     if waypoint in captured_wp:
         return False
-    
+        
     wp_name = config.get_waypoint_name(waypoint)
-    
     logger.info("=" * 60)
     logger.info(f">>> {wp_name} (WP{waypoint}) REACHED - Capturing image...")
     logger.info("=" * 60)
     
-    # Configuration
-    max_wait_time = 6.0  # Max wait (Mission Planner handles the 10s hover)
-    check_interval = 0.4  # Check every 0.4 seconds
-    stable_checks_needed = 2  # Need 2 consecutive stable readings
+    # Wait until drone stabilizes (simplified version)
+    stable_count = 0
+    elapsed = 0.0
+    max_wait_time = 6.0
+    check_interval = 0.4
+    stable_checks_needed = 2
     
     # Relaxed thresholds for outdoor conditions
     speed_threshold = 0.6  # m/s (forgiving for wind)
@@ -57,23 +74,15 @@ def handle_waypoint_capture(pixhawk, camera, metrics, waypoint, flight_number, c
     
     logger.info(">>> Waiting for drone to stabilize...")
     
-    stable_count = 0
-    elapsed = 0.0
-    
     while elapsed < max_wait_time:
         time.sleep(check_interval)
         elapsed += check_interval
-        
-        # Update telemetry
         pixhawk.update()
-        
+
         # Check if drone is stable
         is_hovering = pixhawk.is_hovering(threshold=speed_threshold)
-        is_alt_stable = pixhawk.is_altitude_stable(
-            threshold=altitude_threshold, 
-            window_size=5
-        )
-        
+        is_alt_stable = pixhawk.is_altitude_stable(threshold=altitude_threshold, window_size=5)
+
         if is_hovering and is_alt_stable:
             stable_count += 1
             logger.info(f"  ✓ Stable check {stable_count}/{stable_checks_needed} "
@@ -89,14 +98,14 @@ def handle_waypoint_capture(pixhawk, camera, metrics, waypoint, flight_number, c
                 logger.debug(f"  ○ Lost stability - rechecking... "
                            f"(speed: {pixhawk.groundspeed:.2f} m/s)")
             stable_count = 0
-    
+
     # Check if we achieved stability
     if stable_count < stable_checks_needed:
         logger.warning(f"⚠ Could not achieve stable hover after {elapsed:.1f}s")
         logger.warning(f"  Current speed: {pixhawk.groundspeed:.2f} m/s")
         logger.warning(f"  Altitude variation: {pixhawk.get_altitude_variation():.2f} m")
         logger.warning(f"  Mission Planner will hold for {10 - elapsed:.1f}s more")
-        logger.warning("  Skipping capture this attempt")
+        logger.warning("  Skipping capture this attempt.")
         return False
     
     # Capture image immediately after stability confirmed
@@ -108,13 +117,10 @@ def handle_waypoint_capture(pixhawk, camera, metrics, waypoint, flight_number, c
         )
 
         # Log CSV
-        log_image_capture(flight_number, waypoint, pixhawk.position, image_path)
-        
-        logger.info(f"✓ CAPTURED {wp_name} at {pixhawk.position['rel_alt']:.1f}m altitude")
-        logger.info(f"  Image: {image_path}")
+        log_image_capture(metrics.flight_id, flight_number, waypoint, pixhawk.position, image_path)
+        logger.info(f"✓ CAPTURED {wp_name} at {pixhawk.position['rel_alt']:.1f}m.")
         captured_wp.add(waypoint)
         metrics.increment_waypoint()
-        
         return True
         
     except Exception as e:
@@ -142,7 +148,7 @@ def handle_arm_state_change(pixhawk, metrics, was_armed, flight_number, captured
         logger.info(f"🛫 FLIGHT #{flight_number} - DRONE ARMED")
         logger.info("   Mission monitoring started.")
         logger.info("=" * 60)
-        metrics.start_flight(True, pixhawk.battery_remaining)
+        metrics.start_flight()
         pixhawk.clear_waypoint_log()
         
         return True, flight_number
@@ -150,7 +156,7 @@ def handle_arm_state_change(pixhawk, metrics, was_armed, flight_number, captured
     elif not pixhawk.armed and was_armed:
         # Just disarmed
         logger.info(f"🛬 FLIGHT #{flight_number} - DRONE DISARMED")
-        metrics.end_flight(True)
+        metrics.end_flight()
         captured_wp.clear()
         pixhawk.clear_waypoint_log()
         
@@ -167,7 +173,7 @@ def is_drone_in_air(pixhawk):
 def should_capture_image(pixhawk, waypoint, captured_wp, logger):
     """Check if conditions are met for image capture"""
 
-    # 1. Drone must be armed
+    # 1. Must be armed
     if not pixhawk.armed:
         return False
     
@@ -188,7 +194,7 @@ def should_capture_image(pixhawk, waypoint, captured_wp, logger):
     if waypoint in captured_wp:
         return False
     
-    # 6. Only capture at survey/mapping waypoints (not HOME, TAKEOFF, or RTL)
+    # 6. Must capture only at survey/mapping waypoints
     if not config.is_mapping_waypoint(waypoint):
         logger.debug(f"⚠ {config.get_waypoint_name(waypoint)} is not a mapping waypoint")
         return False
@@ -203,7 +209,7 @@ def should_capture_image(pixhawk, waypoint, captured_wp, logger):
         logger.debug(f"⚠ Altitude not stable: {pixhawk.get_altitude_variation():.2f} m variation")
         return False
     
-    # 9. Verify waypoint was actually reached
+    # 9. Must reached the verified waypoint
     if waypoint not in pixhawk.wp_reached_log:
         logger.debug(f"⚠ {config.get_waypoint_name(waypoint)} not confirmed reached yet")
         return False
@@ -239,9 +245,30 @@ def main_loop(pixhawk, camera, metrics, logger):
 
         # Update metrics during flight
         if pixhawk.armed:
-            telemetry = get_telemetry_dict(pixhawk)
-            if telemetry:
-                metrics.update(telemetry)
+            telemetry = {
+                "attitude": pixhawk.attitude,       # must include roll/pitch/yaw
+                "imu_accel": pixhawk.imu_accel,     # dict x,y,z
+                "gps": {
+                    "lat": pixhawk.position["lat"],
+                    "lon": pixhawk.position["lon"],
+                    "alt": pixhawk.position["rel_alt"],
+                    "groundspeed": pixhawk.groundspeed
+                },
+                "waypoint_index": pixhawk.last_wp,
+                "waypoint_lat": config.get_waypoint_lat(pixhawk.last_wp),
+                "waypoint_lon": config.get_waypoint_lon(pixhawk.last_wp),
+                "waypoint_alt": config.get_waypoint_alt(pixhawk.last_wp),
+                "flight_mode": pixhawk.mode,
+                "nav_state": pixhawk.nav_state,
+                "is_hovering": pixhawk.is_hovering(threshold=0.6),  # Add hover flag
+                "battery": {
+                    "voltage": pixhawk.battery_voltage,
+                    "current": pixhawk.battery_current,
+                    "percentage": pixhawk.battery_remaining
+                }
+            }
+            metrics.log_telemetry(telemetry)
+
         
         # Check for image capture
         if should_capture_image(pixhawk, pixhawk.last_wp, captured_wp, logger):
@@ -282,7 +309,8 @@ def main():
     # Initialize components
     pixhawk = Pixhawk()
     camera = Camera()
-    metrics = FlightMetrics()
+    next_flight_number = get_next_daily_flight_number()
+    metrics = FlightMetricsLogger(flight_number=next_flight_number)
 
     logger.info("=" * 60)
     logger.info("🍍 PINYASURI FLIGHT SYSTEM 🚁")
