@@ -1,0 +1,370 @@
+# Line 68: Missing logger parameter
+log_image_capture(metrics.flight_id, flight_number, waypoint, pixhawk.position, image_path)
+# Should be:
+log_image_capture(metrics.flight_id, flight_number, waypoint, pixhawk.position, image_path, logger)
+```
+
+### ✅ **Everything Else Looks Good!**
+- Battery voltage/current updates: ✓ Fixed
+- File locking for flight numbers: ✓ Fixed
+- GPS validation: ✓ Fixed
+- Pixhawk cleanup: ✓ Fixed
+- Error handling: ✓ Fixed
+
+---
+
+## 📋 **Complete Step-by-Step Execution Flow**
+
+Let me walk you through exactly what happens when you run `python3 main.py`:
+
+### **Phase 1: System Initialization** 🚀
+```
+1. main() starts
+   ├─ Setup logging (creates daily log file)
+   ├─ Create Pixhawk object
+   │  └─ Opens serial connection to /dev/ttyAMA0
+   ├─ Create Camera object
+   │  └─ Initializes Picamera2 (4056x3040 resolution)
+   ├─ Get next flight number (reads/creates daily_flight_id.txt)
+   │  └─ Example: "20260113-1" (January 13, 2026, Flight #1)
+   └─ Create FlightMetricsLogger
+      └─ Creates/opens raw_flight_data.csv with headers
+```
+
+**Console Output:**
+```
+2026-01-13 08:30:15 | INFO | PinyaSuri | ============================================================
+2026-01-13 08:30:15 | INFO | PinyaSuri | 🍍 PINYASURI FLIGHT SYSTEM 🚁
+2026-01-13 08:30:15 | INFO | PinyaSuri | ============================================================
+```
+
+---
+
+### **Phase 2: Connection & Stream Setup** 📡
+```
+2. pixhawk.wait_for_connection()
+   ├─ Waits for HEARTBEAT from Pixhawk (proves connection alive)
+   └─ Requests MAVLink message streams:
+      ├─ HEARTBEAT @ 1Hz (armed status, flight mode)
+      ├─ MISSION_CURRENT @ 5Hz (current waypoint index)
+      ├─ MISSION_ITEM_REACHED @ 5Hz (waypoint reached events)
+      ├─ GLOBAL_POSITION_INT @ 10Hz (GPS lat/lon/alt, speed)
+      ├─ ATTITUDE @ 50Hz (roll, pitch, yaw)
+      ├─ BATTERY_STATUS @ 1Hz (voltage, current, %)
+      ├─ SYS_STATUS @ 1Hz (backup battery info)
+      └─ RAW_IMU @ 5Hz (accelerometer data)
+
+3. initialize_csv()
+   └─ Creates image_captures.csv with headers if doesn't exist
+```
+
+**Console Output:**
+```
+2026-01-13 08:30:16 | INFO | PinyaSuri | >>> Waiting for heartbeat...
+2026-01-13 08:30:17 | INFO | PinyaSuri | ✓ Pixhawk connected successfully!
+2026-01-13 08:30:17 | INFO | PinyaSuri | >>> Requesting MAVLink message streams...
+2026-01-13 08:30:18 | INFO | PinyaSuri | ✓ MAVLink streams configured!
+2026-01-13 08:30:18 | INFO | PinyaSuri | ============================================================
+2026-01-13 08:30:18 | INFO | PinyaSuri | 🍍 PINYASURI FLIGHT SYSTEM READY! 🚁
+2026-01-13 08:30:18 | INFO | PinyaSuri | System will run continuously. Press Ctrl+C to stop.
+2026-01-13 08:30:18 | INFO | PinyaSuri | ============================================================
+```
+
+---
+
+### **Phase 3: Main Loop (Ground - Waiting for ARM)** ⏳
+```
+4. main_loop() enters infinite loop (every 0.1 seconds):
+   
+   Loop iteration:
+   ├─ pixhawk.update()
+   │  └─ Drains ALL pending MAVLink messages from queue
+   │     ├─ Updates position (lat/lon/alt)
+   │     ├─ Updates groundspeed
+   │     ├─ Updates attitude (roll/pitch/yaw)
+   │     ├─ Updates battery (voltage/current/%)
+   │     ├─ Updates armed status
+   │     ├─ Updates flight mode
+   │     └─ Logs waypoint reached events
+   │
+   ├─ handle_arm_state_change()
+   │  └─ Detects: was_armed=False, pixhawk.armed=False
+   │     → No state change, continues waiting
+   │
+   └─ sleep(0.1 seconds)
+```
+
+**Console Output:**
+```
+(Waiting silently... no output until state changes)
+```
+
+---
+
+### **Phase 4: Drone Arms - Flight Starts** 🛫
+
+**User Action:** Switch to AUTO mode in Mission Planner → Drone arms
+```
+5. Pixhawk sends HEARTBEAT with armed flag set
+
+6. handle_arm_state_change() detects transition:
+   ├─ was_armed=False → pixhawk.armed=True
+   ├─ metrics.start_flight()
+   │  └─ Sets flight_id = "20260113_F1"
+   ├─ pixhawk.clear_waypoint_log()
+   └─ Returns was_armed=True
+```
+
+**Console Output:**
+```
+2026-01-13 08:35:22 | INFO | PinyaSuri | ============================================================
+2026-01-13 08:35:22 | INFO | PinyaSuri | 🛫 FLIGHT #1 - DRONE ARMED
+2026-01-13 08:35:22 | INFO | PinyaSuri |    Mission monitoring started.
+2026-01-13 08:35:22 | INFO | PinyaSuri | ============================================================
+2026-01-13 08:35:22 | INFO | PinyaSuri | 🛫 Flight 20260113_F1 started at 2026-01-13T08:35:22.458923.
+2026-01-13 08:35:22 | INFO | PinyaSuri | > Flight Mode: AUTO
+```
+
+---
+
+### **Phase 5: In-Flight - Takeoff & Transit** ✈️
+```
+7. Loop continues (every 0.1 seconds):
+   
+   ├─ pixhawk.update()
+   │  └─ Position updates: alt=0.5m → 1.2m → 2.3m → 5.0m
+   │
+   ├─ Flight mode check
+   │  └─ Logs any mode changes (STABILIZE → AUTO)
+   │
+   ├─ Telemetry logging (because armed=True):
+   │  └─ Every loop writes to raw_flight_data.csv:
+   │     - flight_id, timestamp
+   │     - roll, pitch, yaw
+   │     - accel_x, accel_y, accel_z
+   │     - lat, lon, alt, groundspeed
+   │     - waypoint_index (0=HOME, 1=TAKEOFF, 2,3,4...=mapping)
+   │     - waypoint_lat, waypoint_lon, waypoint_alt
+   │     - flight_mode, battery data
+   │
+   └─ should_capture_image() checks:
+      ├─ ✓ Armed? Yes
+      ├─ ✓ Valid waypoint? last_wp = 1 (TAKEOFF)
+      ├─ ✓ Position data? Yes (lat/lon/alt available)
+      ├─ ✗ Altitude >= 2.0m? Not yet (alt=1.5m)
+      └─ Returns False → No capture
+```
+
+**Console Output:**
+```
+2026-01-13 08:35:25 | INFO | PinyaSuri | > Flight Mode: AUTO
+(No other output - system is monitoring)
+```
+
+---
+
+### **Phase 6: Reaching First Mapping Waypoint** 📍
+```
+8. Drone flies to Waypoint 2 (first mapping point)
+
+9. Pixhawk sends MISSION_ITEM_REACHED with seq=2
+
+10. pixhawk.update() processes this:
+    ├─ Checks: mode=="AUTO" ✓
+    ├─ Checks: alt >= 2.0m ✓ (alt=5.2m)
+    ├─ Checks: waypoint not in wp_reached_log ✓
+    └─ Adds to wp_reached_log
+       └─ wp_reached_log = {2}
+```
+
+**Console Output:**
+```
+2026-01-13 08:35:45 | INFO | PinyaSuri | ✓ WAYPOINT_2 (WP2) REACHED, CONFIRMED!
+```
+
+---
+
+### **Phase 7: Image Capture Sequence** 📸
+```
+11. should_capture_image() runs full checks:
+    ├─ ✓ Armed? Yes
+    ├─ ✓ Valid waypoint? last_wp=2
+    ├─ ✓ Position data? Yes
+    ├─ ✓ Altitude >= 2.0m? Yes (5.2m)
+    ├─ ✓ Not already captured? Yes (2 not in captured_wp)
+    ├─ ✓ Is mapping waypoint? Yes (is_mapping_waypoint(2)=True)
+    ├─ ✓ Is hovering? Checking groundspeed < 0.6 m/s...
+    │  └─ groundspeed = 0.3 m/s ✓
+    ├─ ✓ Altitude stable? Checking altitude variation < 0.8m...
+    │  └─ variation = 0.4m ✓
+    ├─ ✓ Waypoint confirmed? Yes (2 in wp_reached_log)
+    └─ Returns True!
+
+12. handle_waypoint_capture() executes:
+    
+    ├─ STABILITY VERIFICATION LOOP (max 6 seconds):
+    │  └─ Every 0.4 seconds:
+    │     ├─ Check groundspeed < 0.6 m/s
+    │     ├─ Check altitude variation < 0.8m
+    │     └─ If stable for 2 consecutive checks → CAPTURE!
+    │
+    ├─ After 0.8s: Both checks pass!
+    │
+    ├─ camera.capture():
+    │  ├─ Creates filename: "pinyasuri_flight1_wp2_20260113T083546123.jpg"
+    │  ├─ Saves to: images/20260113/
+    │  └─ Returns full path
+    │
+    ├─ log_image_capture():
+    │  └─ Writes to image_captures.csv:
+    │     - timestamp: 1705140946.123
+    │     - flight_id: 20260113_F1
+    │     - flight_number: 1
+    │     - waypoint: 2
+    │     - lat: 14.123456
+    │     - lon: 121.654321
+    │     - rel_alt: 5.2
+    │     - image_path: /home/pi/pinyasuri/images/20260113/pinyasuri_flight1_wp2_...jpg
+    │
+    └─ Add waypoint to captured_wp
+       └─ captured_wp = {2}
+```
+
+**Console Output:**
+```
+2026-01-13 08:35:46 | INFO | PinyaSuri | ============================================================
+2026-01-13 08:35:46 | INFO | PinyaSuri | >>> WAYPOINT_2 (WP2) REACHED - Capturing image...
+2026-01-13 08:35:46 | INFO | PinyaSuri | ============================================================
+2026-01-13 08:35:46 | INFO | PinyaSuri | >>> Waiting for drone to stabilize...
+2026-01-13 08:35:46 | INFO | PinyaSuri |   ✓ Stable check 1/2 (speed: 0.28 m/s, alt var: 0.35 m)
+2026-01-13 08:35:47 | INFO | PinyaSuri |   ✓ Stable check 2/2 (speed: 0.31 m/s, alt var: 0.42 m)
+2026-01-13 08:35:47 | INFO | PinyaSuri | ✓ Drone stabilized after 0.8s - Capturing now!
+2026-01-13 08:35:47 | INFO | PinyaSuri | ✓ Captured pinyasuri_flight1_wp2_20260113T083547123.jpg in folder 20260113
+2026-01-13 08:35:47 | INFO | PinyaSuri | ✓ CAPTURED WAYPOINT_2 at 5.2m.
+```
+
+---
+
+### **Phase 8: Continue Mission** 🔄
+```
+13. Loop continues:
+    ├─ Drone flies to WP3, WP4, WP5... WP20
+    ├─ Each mapping waypoint:
+    │  ├─ Gets confirmed via MISSION_ITEM_REACHED
+    │  ├─ Passes should_capture_image() checks
+    │  ├─ Captures image after stability verification
+    │  └─ Logs to CSVs
+    │
+    └─ Telemetry logs continuously to raw_flight_data.csv
+       (10 times per second = 600 rows/minute)
+```
+
+**Console Output (repeated for each waypoint):**
+```
+2026-01-13 08:36:15 | INFO | PinyaSuri | ✓ WAYPOINT_3 (WP3) REACHED, CONFIRMED!
+2026-01-13 08:36:16 | INFO | PinyaSuri | ============================================================
+2026-01-13 08:36:16 | INFO | PinyaSuri | >>> WAYPOINT_3 (WP3) REACHED - Capturing image...
+...
+2026-01-13 08:36:17 | INFO | PinyaSuri | ✓ CAPTURED WAYPOINT_3 at 5.1m.
+```
+
+---
+
+### **Phase 9: Mission Complete - Return to Home** 🏠
+```
+14. Drone completes final waypoint, returns to HOME
+
+15. Pixhawk sends MISSION_ITEM_REACHED with seq=0 (HOME)
+    └─ System logs it but doesn't capture (HOME not a mapping waypoint)
+
+16. Drone lands and disarms
+```
+
+**Console Output:**
+```
+2026-01-13 08:42:30 | INFO | PinyaSuri | ✓ HOME (WP0) REACHED, CONFIRMED!
+```
+
+---
+
+### **Phase 10: Disarm - Flight Ends** 🛬
+```
+17. Pixhawk sends HEARTBEAT with armed flag cleared
+
+18. handle_arm_state_change() detects transition:
+    ├─ was_armed=True → pixhawk.armed=False
+    ├─ metrics.end_flight()
+    │  └─ Logs flight end time
+    ├─ captured_wp.clear()
+    │  └─ captured_wp = {}
+    ├─ pixhawk.clear_waypoint_log()
+    │  └─ wp_reached_log = {}
+    └─ flight_number increments to 2
+       └─ Updates daily_flight_id.txt: "20260113-2"
+```
+
+**Console Output:**
+```
+2026-01-13 08:42:35 | INFO | PinyaSuri | 🛬 FLIGHT #1 - DRONE DISARMED
+2026-01-13 08:42:35 | INFO | PinyaSuri | 🛬 Flight 20260113_F1 ended at 2026-01-13T08:42:35.789012.
+```
+
+---
+
+### **Phase 11: Ready for Next Flight** 🔁
+```
+19. System returns to Phase 3 (waiting for next ARM)
+    └─ Now ready for Flight #2
+```
+
+---
+
+### **Phase 12: User Stops System** ⛔
+
+**User Action:** Press Ctrl+C
+```
+20. KeyboardInterrupt caught
+
+21. cleanup() executes:
+    ├─ If still armed: calls metrics.end_flight()
+    ├─ camera.close()
+    │  └─ Stops Picamera2
+    └─ pixhawk.master.close()
+       └─ Closes serial connection
+```
+
+**Console Output:**
+```
+^C
+2026-01-13 08:45:00 | INFO | PinyaSuri | 
+2026-01-13 08:45:00 | INFO | PinyaSuri | ============================================================
+2026-01-13 08:45:00 | INFO | PinyaSuri | ⚠ MANUAL STOP - Interrupted by user! ⚠
+2026-01-13 08:45:00 | INFO | PinyaSuri | ============================================================
+2026-01-13 08:45:01 | INFO | PinyaSuri | ============================================================
+2026-01-13 08:45:01 | INFO | PinyaSuri | ⚠ INITIATING SHUTDOWN ⚠
+2026-01-13 08:45:01 | INFO | PinyaSuri | ============================================================
+2026-01-13 08:45:01 | INFO | PinyaSuri | >>> Stopping mission tasks...
+2026-01-13 08:45:01 | INFO | PinyaSuri | ✓ Camera stopped successfully.
+2026-01-13 08:45:01 | INFO | PinyaSuri | ✓ Pixhawk connection closed.
+2026-01-13 08:45:01 | INFO | PinyaSuri | ✓ Shutdown complete.
+```
+
+---
+
+## 📊 **Final Data Files Created**
+
+After one flight with 18 mapping waypoints:
+```
+pinyasuri/
+├── logs/
+│   ├── flight_2026-01-13.log          (Human-readable log, ~500 lines)
+│   ├── raw_flight_data.csv            (Telemetry, ~4,200 rows @ 7 min flight)
+│   ├── image_captures.csv             (18 rows, one per captured image)
+│   └── daily_flight_id.txt            (Contains: "20260113-2")
+│
+└── images/
+    └── 20260113/
+        ├── pinyasuri_flight1_wp2_20260113T083547123.jpg
+        ├── pinyasuri_flight1_wp3_20260113T083617456.jpg
+        ├── pinyasuri_flight1_wp4_20260113T083648789.jpg
+        └── ... (18 images total)

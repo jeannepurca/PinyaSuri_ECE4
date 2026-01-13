@@ -4,7 +4,6 @@
 import logging
 import pathlib
 from datetime import datetime
-from picamera2 import Picamera2
 import config
 
 logger = logging.getLogger(__name__)

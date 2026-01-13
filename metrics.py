@@ -6,6 +6,7 @@ import logging
 from datetime import datetime
 from pathlib import Path
 import config
+import fcntl
 
 logger = logging.getLogger(__name__)
 
@@ -15,31 +16,36 @@ DAILY_FLIGHT_FILE = config.LOG_DIR / "daily_flight_id.txt"
 def get_next_daily_flight_number():
     """Get next flight number for today; reset if a new day"""
     today_str = datetime.utcnow().strftime("%Y%m%d")
-    
-    # Default
     last_date, last_number = today_str, 0
 
-    if DAILY_FLIGHT_FILE.exists():
-        with open(DAILY_FLIGHT_FILE, "r") as f:
+    # Use file locking to prevent race conditions
+    with open(DAILY_FLIGHT_FILE, "a+") as f:
+        try:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)  # Exclusive lock
+            f.seek(0)
             content = f.read().strip()
-        if content:
-            try:
-                last_date_stored, last_number_stored = content.split("-")
-                last_number_stored = int(last_number_stored)
-                last_date, last_number = last_date_stored, last_number_stored
-            except Exception:
-                # Corrupted file, reset
-                last_date, last_number = today_str, 0
-
-    if last_date == today_str:
-        next_number = last_number + 1
-    else:
-        next_number = 1  # new day resets counter
-
-    # Save back
-    with open(DAILY_FLIGHT_FILE, "w") as f:
-        f.write(f"{today_str}-{next_number}")
-
+            
+            if content:
+                try:
+                    last_date_stored, last_number_stored = content.split("-")
+                    last_number_stored = int(last_number_stored)
+                    last_date, last_number = last_date_stored, last_number_stored
+                except Exception:
+                    last_date, last_number = today_str, 0
+            
+            if last_date == today_str:
+                next_number = last_number + 1
+            else:
+                next_number = 1
+            
+            # Write back
+            f.seek(0)
+            f.truncate()
+            f.write(f"{today_str}-{next_number}")
+            
+        finally:
+            fcntl.flock(f.fileno(), fcntl.LOCK_UN)  # Release lock
+    
     return next_number
 
 class FlightMetricsLogger:

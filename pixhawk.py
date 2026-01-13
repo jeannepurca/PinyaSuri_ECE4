@@ -49,15 +49,43 @@ class Pixhawk:
         self.nav_state = "UNKNOWN"
 
     def get_waypoint_lat(self, wp_num):
-        # TODO: Implement mission item retrieval
+        """Get waypoint latitude from mission"""
+        if wp_num is None or wp_num < 0:
+            return 0.0
+        try:
+            self.master.waypoint_request_send(wp_num)
+            msg = self.master.recv_match(type='MISSION_ITEM', blocking=True, timeout=1)
+            if msg and msg.seq == wp_num:
+                return msg.x  # latitude in degrees
+        except Exception as e:
+            logger.debug(f"Could not retrieve waypoint {wp_num} lat: {e}")
         return 0.0
 
     def get_waypoint_lon(self, wp_num):
+        """Get waypoint longitude from mission"""
+        if wp_num is None or wp_num < 0:
+            return 0.0
+        try:
+            self.master.waypoint_request_send(wp_num)
+            msg = self.master.recv_match(type='MISSION_ITEM', blocking=True, timeout=1)
+            if msg and msg.seq == wp_num:
+                return msg.y  # longitude in degrees
+        except Exception as e:
+            logger.debug(f"Could not retrieve waypoint {wp_num} lon: {e}")
         return 0.0
 
     def get_waypoint_alt(self, wp_num):
+        """Get waypoint altitude from mission"""
+        if wp_num is None or wp_num < 0:
+            return 0.0
+        try:
+            self.master.waypoint_request_send(wp_num)
+            msg = self.master.recv_match(type='MISSION_ITEM', blocking=True, timeout=1)
+            if msg and msg.seq == wp_num:
+                return msg.z  # altitude in meters
+        except Exception as e:
+            logger.debug(f"Could not retrieve waypoint {wp_num} alt: {e}")
         return 0.0
-
 
     # ---------------------------------------------------------
     # CONNECTION & STREAM SETUP
@@ -131,16 +159,21 @@ class Pixhawk:
             # POSITION
             # -------------------------------
             if msg_type == "GLOBAL_POSITION_INT":
-                self.position = {
-                    "lat": msg.lat / 1e7,
-                    "lon": msg.lon / 1e7,
-                    "rel_alt": msg.relative_alt / 1000.0
-                }
-                # Extract groundspeed
-                self.groundspeed = math.sqrt(msg.vx**2 + msg.vy**2) / 100.0
+                # FIX: Validate position data before using
+                lat = msg.lat / 1e7
+                lon = msg.lon / 1e7
                 
-                # Track altitude history for stability detection
-                self.altitude_history.append(self.position["rel_alt"])
+                # Basic sanity check (valid Earth coordinates)
+                if -90 <= lat <= 90 and -180 <= lon <= 180:
+                    self.position = {
+                        "lat": lat,
+                        "lon": lon,
+                        "rel_alt": msg.relative_alt / 1000.0
+                    }
+                    self.groundspeed = math.sqrt(msg.vx**2 + msg.vy**2) / 100.0
+                    self.altitude_history.append(self.position["rel_alt"])
+                else:
+                    logger.warning(f"Invalid GPS coordinates: lat={lat}, lon={lon}")
 
             # -------------------------------
             # ATTITUDE (Roll, Pitch, Yaw)
@@ -200,6 +233,12 @@ class Pixhawk:
                 if msg.battery_remaining != -1:
                     self.battery_remaining = msg.battery_remaining
                     self.battery_type = "percent"
+                    self.battery_voltage = msg.voltages[0] / 1000.0 if msg.voltages else 0.0
+                    self.battery_current = msg.current_battery / 100.0 if msg.current_battery != -1 else 0.0
+                if msg.voltages and len(msg.voltages) > 0:
+                    self.battery_voltage = msg.voltages[0] / 1000.0  # mV to V
+                if msg.current_battery != -1:
+                    self.battery_current = msg.current_battery / 100.0  # cA to A
 
             # -------------------------------
             # BATTERY (fallback)
@@ -208,6 +247,11 @@ class Pixhawk:
                 if self.battery_remaining is None and hasattr(msg, "battery_remaining"):
                     self.battery_remaining = msg.battery_remaining
                     self.battery_type = "percent"
+                if hasattr(msg, "voltage_battery") and self.battery_voltage == 0.0:
+                    self.battery_voltage = msg.voltage_battery / 1000.0  # mV to V
+                if hasattr(msg, "current_battery") and self.battery_current == 0.0:
+                    self.battery_current = msg.current_battery / 100.0  # cA to A
+
 
     # ---------------------------------------------------------
     # Attitude Getters (for gimbal)

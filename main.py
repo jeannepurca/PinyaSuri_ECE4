@@ -33,20 +33,23 @@ def initialize_csv():
                 "image_path"
             ])
 
-def log_image_capture(flight_id, flight_number, waypoint, position, image_path):
-    """Append image capture record to CSV"""
-    with open(config.IMAGE_LOG_CSV, "a", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow([
-            time.time(),
-            flight_id,
-            flight_number,
-            waypoint,
-            position["lat"],
-            position["lon"],
-            position["rel_alt"],
-            image_path
-        ])
+def log_image_capture(flight_id, flight_number, waypoint, position, image_path, logger):
+    """Append image capture record to CSV with error handling"""
+    try:
+        with open(config.IMAGE_LOG_CSV, "a", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                time.time(),
+                flight_id,
+                flight_number,
+                waypoint,
+                position["lat"],
+                position["lon"],
+                position["rel_alt"],
+                image_path
+            ])
+    except Exception as e:
+        logger.error(f"Failed to log image capture to CSV: {e}")
 
 # ----------------------------
 # Capture handler
@@ -117,10 +120,9 @@ def handle_waypoint_capture(pixhawk, camera, metrics, waypoint, flight_number, c
         )
 
         # Log CSV
-        log_image_capture(metrics.flight_id, flight_number, waypoint, pixhawk.position, image_path)
+        log_image_capture(metrics.flight_id, flight_number, waypoint, pixhawk.position, image_path, logger)
         logger.info(f"✓ CAPTURED {wp_name} at {pixhawk.position['rel_alt']:.1f}m.")
         captured_wp.add(waypoint)
-        metrics.increment_waypoint()
         return True
         
     except Exception as e:
@@ -285,7 +287,7 @@ def main_loop(pixhawk, camera, metrics, logger):
     
     return was_armed
 
-def cleanup(camera, metrics, was_armed, logger):
+def cleanup(camera, pixhawk, metrics, was_armed, logger):
     """Clean up resources before exit"""
     logger.info("=" * 60)
     logger.info("⚠ INITIATING SHUTDOWN ⚠")
@@ -301,16 +303,21 @@ def cleanup(camera, metrics, was_armed, logger):
         camera.close()
     except Exception as e:
         logger.info(f"⚠ Error closing camera: {e} ⚠")
+
+    # Cleanup pixhawk
+    try:
+        if pixhawk and pixhawk.master:
+            pixhawk.master.close()
+            logger.info("✓ Pixhawk connection closed.")
+    except Exception as e:
+        logger.warning(f"⚠ Error closing Pixhawk: {e} ⚠")
     
     logger.info("✓ Shutdown complete.")
 
 def main():
     global running
     
-    # Setup
     logger = setup_logging()
-    
-    # Initialize components
     pixhawk = Pixhawk()
     camera = Camera()
     next_flight_number = get_next_daily_flight_number()
@@ -324,10 +331,7 @@ def main():
     try:
         pixhawk.wait_for_connection()
         initialize_csv()
-        
-        # Run main loop
         was_armed = main_loop(pixhawk, camera, metrics, logger)
-        
     except KeyboardInterrupt:
         logger.info("")
         logger.info("=" * 60)
@@ -340,7 +344,7 @@ def main():
         logger.error(f"⚠ Fatal error: {e} ⚠", exc_info=True)
         was_armed = False
     finally:
-        cleanup(camera, metrics, was_armed, logger)
+        cleanup(camera, pixhawk, metrics, was_armed, logger)
 
 if __name__ == "__main__":
     main()
