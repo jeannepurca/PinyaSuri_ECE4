@@ -220,7 +220,7 @@ def should_capture_image(pixhawk, waypoint, captured_wp, logger):
 
 def main_loop(pixhawk, camera, metrics, logger):
     captured_wp = set()
-    flight_number = 1
+    flight_number = metrics.flight_number
     was_armed = False
     current_mode = "UNKNOWN"
     
@@ -294,7 +294,7 @@ def cleanup(camera, metrics, was_armed, logger):
 
     if was_armed:
         logger.info(">>> Finalizing flight metrics...")
-        metrics.end_flight(True)
+        metrics.end_flight()
 
     # Cleanup camera
     try:
