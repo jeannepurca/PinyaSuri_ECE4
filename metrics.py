@@ -43,16 +43,15 @@ def get_next_daily_flight_number():
     return next_number
 
 class FlightMetricsLogger:
-    def __init__(self):
-        # Determine today's flight number
-        self.flight_number = get_next_daily_flight_number()
+    def __init__(self, flight_number: int):
+        self.flight_number = flight_number
         self.flight_start_time = None
         self.flight_end_time = None
         self.armed = False
 
-        # Create a unique flight ID: YYYYMMDD_F<flight_number>
+        # Create flight ID using today's date + flight number
         self.flight_id = self._generate_flight_id()
-        
+
         # CSV setup
         self.csv_file = config.FLIGHT_RAW_CSV
         self._initialize_csv()
