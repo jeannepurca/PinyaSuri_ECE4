@@ -246,7 +246,11 @@ def main_loop(pixhawk, camera, metrics, logger):
         # Update metrics during flight
         if pixhawk.armed:
             telemetry = {
-                "attitude": pixhawk.attitude,       # must include roll/pitch/yaw
+                "attitude": {
+                    "roll": getattr(pixhawk, "roll", 0.0),
+                    "pitch": getattr(pixhawk, "pitch", 0.0),
+                    "yaw": getattr(pixhawk, "yaw", 0.0)
+                },
                 "imu_accel": pixhawk.imu_accel,     # dict x,y,z
                 "gps": {
                     "lat": pixhawk.position["lat"],
