@@ -43,6 +43,22 @@ class Pixhawk:
         # Altitude Stability Tracking
         self.altitude_history = deque(maxlen=10)
 
+        # Battery Status
+        self.battery_voltage = 0.0
+        self.battery_current = 0.0
+        self.nav_state = "UNKNOWN"
+
+    def get_waypoint_lat(self, wp_num):
+        # TODO: Implement mission item retrieval
+        return 0.0
+
+    def get_waypoint_lon(self, wp_num):
+        return 0.0
+
+    def get_waypoint_alt(self, wp_num):
+        return 0.0
+
+
     # ---------------------------------------------------------
     # CONNECTION & STREAM SETUP
     # ---------------------------------------------------------

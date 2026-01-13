@@ -259,9 +259,9 @@ def main_loop(pixhawk, camera, metrics, logger):
                     "groundspeed": pixhawk.groundspeed
                 },
                 "waypoint_index": pixhawk.last_wp,
-                "waypoint_lat": config.get_waypoint_lat(pixhawk.last_wp),
-                "waypoint_lon": config.get_waypoint_lon(pixhawk.last_wp),
-                "waypoint_alt": config.get_waypoint_alt(pixhawk.last_wp),
+                "waypoint_lat": pixhawk.get_waypoint_lat(pixhawk.last_wp),
+                "waypoint_lon": pixhawk.get_waypoint_lon(pixhawk.last_wp),
+                "waypoint_alt": pixhawk.get_waypoint_alt(pixhawk.last_wp),
                 "flight_mode": pixhawk.mode,
                 "nav_state": pixhawk.nav_state,
                 "is_hovering": pixhawk.is_hovering(threshold=0.6),  # Add hover flag

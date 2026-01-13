@@ -39,6 +39,13 @@ CLASSIFICATION_CSV = LOG_DIR / "ai_classifications.csv"
 FLIGHT_LOG_FILE = get_flight_log_file()
 
 
+# Stability thresholds
+HOVER_SPEED_THRESHOLD = 0.6  # m/s
+ALTITUDE_STABILITY_THRESHOLD = 0.8  # m
+STABILITY_WAIT_TIME = 6.0  # seconds
+STABILITY_CHECK_INTERVAL = 0.4  # seconds
+STABILITY_CHECKS_NEEDED = 2
+
 # ============================================================================  
 # IMAGE CAPTURE DIRECTORY (daily subfolders)  
 # ============================================================================  
@@ -111,4 +118,4 @@ CLASS_NAMES = {
 }
 
 def get_class_name(index: int) -> str:
-    return CLASS_NAMES.get(index, f"unknown_{index}")
+    return CLASS_NAMES.get(index, f"unknown_{index}")  # ✓ Added 'S'
