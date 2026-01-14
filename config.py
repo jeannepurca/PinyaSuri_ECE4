@@ -102,6 +102,15 @@ MAIN_LOOP_INTERVAL = 0.1  # seconds
 METRICS_LOG_INTERVAL = 0.5  # seconds
 METRICS_WINDOW_SIZE = 10
 
+
+# ============================================================================  
+# BURST CAPTURE CONFIGURATION  
+# ============================================================================  
+BURST_CAPTURE_COUNT = 5  # Number of images per waypoint
+BURST_INTERVAL = 0.3  # Seconds between captures
+BURST_STABILIZATION_DELAY = 0.2  # Extra delay if instability detected during burst
+
+
 # ============================================================================  
 # AI CONFIGURATION  
 # ============================================================================  
@@ -118,4 +127,4 @@ CLASS_NAMES = {
 }
 
 def get_class_name(index: int) -> str:
-    return CLASS_NAMES.get(index, f"unknown_{index}")  # ✓ Added 'S'
+    return CLASS_NAMES.get(index, f"unknown_{index}")

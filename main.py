@@ -5,6 +5,7 @@ import time
 import csv
 import logging
 import sys
+from pathlib import Path
 import config
 from logging_config import setup_logging
 from pixhawk import Pixhawk
@@ -30,10 +31,12 @@ def initialize_csv():
                 "lat_deg",
                 "lon_deg",
                 "rel_alt_m",
+                "burst_id",
+                "burst_index",
                 "image_path"
             ])
 
-def log_image_capture(flight_id, flight_number, waypoint, position, image_path, logger):
+def log_image_capture(flight_id, flight_number, waypoint, position, burst_id, burst_index, image_path, logger):
     """Append image capture record to CSV with error handling"""
     try:
         with open(config.IMAGE_LOG_CSV, "a", newline="") as f:
@@ -46,6 +49,8 @@ def log_image_capture(flight_id, flight_number, waypoint, position, image_path, 
                 position["lat"],
                 position["lon"],
                 position["rel_alt"],
+                burst_id,
+                burst_index,
                 image_path
             ])
     except Exception as e:
@@ -55,16 +60,16 @@ def log_image_capture(flight_id, flight_number, waypoint, position, image_path, 
 # Capture handler
 # ----------------------------
 def handle_waypoint_capture(pixhawk, camera, metrics, waypoint, flight_number, captured_wp, logger):
-    """Capture image at waypoint and log data"""
+    """Capture burst images at waypoint with stability monitoring"""
     if waypoint in captured_wp:
         return False
         
     wp_name = config.get_waypoint_name(waypoint)
     logger.info("=" * 60)
-    logger.info(f">>> {wp_name} (WP{waypoint}) REACHED - Capturing image...")
+    logger.info(f">>> {wp_name} (WP{waypoint}) REACHED - Capturing burst images...")
     logger.info("=" * 60)
     
-    # Wait until drone stabilizes (simplified version)
+    # Wait until drone stabilizes
     stable_count = 0
     elapsed = 0.0
     max_wait_time = 6.0
@@ -110,23 +115,68 @@ def handle_waypoint_capture(pixhawk, camera, metrics, waypoint, flight_number, c
         logger.warning(f"  Mission Planner will hold for {10 - elapsed:.1f}s more")
         logger.warning("  Skipping capture this attempt.")
         return False
-    
-    # Capture image immediately after stability confirmed
-    try:
-        image_path = camera.capture(
-            waypoint=waypoint,
-            flight_number=flight_number,
-            prefix="pinyasuri"
-        )
 
-        # Log CSV
-        log_image_capture(metrics.flight_id, flight_number, waypoint, pixhawk.position, image_path, logger)
-        logger.info(f"✓ CAPTURED {wp_name} at {pixhawk.position['rel_alt']:.1f}m.")
+    # Burst capture with stability monitoring
+    num_captures = config.BURST_CAPTURE_COUNT
+    burst_interval = config.BURST_INTERVAL
+    captured_images = []
+    burst_id = f"{metrics.flight_id}_wp{waypoint}_{int(time.time())}"
+
+    logger.info(f"📸 Starting burst capture ({num_captures} frames)...")
+
+    for i in range(num_captures):
+        # Quick stability check between frames (except first)
+        if i > 0:
+            pixhawk.update()  # Get latest telemetry
+            
+            if not pixhawk.is_hovering(threshold=0.6):
+                logger.warning(f"⚠ Instability detected at frame {i+1} (speed: {pixhawk.groundspeed:.2f} m/s)")
+                # Add extra settling time
+                time.sleep(config.BURST_STABILIZATION_DELAY)
+        
+        try:
+            image_path = camera.capture(
+                waypoint=waypoint,
+                flight_number=flight_number,
+                prefix="pinyasuri",
+                burst_index=i
+            )
+            
+            # Verify file was written and has valid size
+            if Path(image_path).exists() and Path(image_path).stat().st_size > 1000:
+                captured_images.append(image_path)
+                
+                # Log with burst metadata
+                log_image_capture(
+                    metrics.flight_id, 
+                    flight_number, 
+                    waypoint, 
+                    pixhawk.position,
+                    burst_id,
+                    i,
+                    image_path, 
+                    logger
+                )
+                
+                logger.info(f"  ✓ Frame {i+1}/{num_captures} captured "
+                           f"(speed: {pixhawk.groundspeed:.2f} m/s, "
+                           f"size: {Path(image_path).stat().st_size / 1024:.1f} KB)")
+            else:
+                logger.error(f"⚠ Frame {i+1} file invalid or too small")
+            
+            if i < num_captures - 1:  # Don't wait after last image
+                time.sleep(burst_interval)
+                
+        except Exception as e:
+            logger.error(f"⚠ Burst frame {i+1} failed: {e}")
+
+    if captured_images:
+        logger.info(f"✓ CAPTURED {len(captured_images)}/{num_captures} images at {wp_name}")
+        logger.info(f"  Burst ID: {burst_id}")
         captured_wp.add(waypoint)
         return True
-        
-    except Exception as e:
-        logger.error(f"⚠ Camera capture failed: {e}")
+    else:
+        logger.error("⚠ Burst capture completely failed - no valid images")
         return False
 
 def get_telemetry_dict(pixhawk):
@@ -162,7 +212,7 @@ def handle_arm_state_change(pixhawk, metrics, was_armed, flight_number, captured
         captured_wp.clear()
         pixhawk.clear_waypoint_log()
         
-        return False, flight_number + 1
+        return False, metrics.flight_number
     
     return was_armed, flight_number
 
@@ -253,7 +303,7 @@ def main_loop(pixhawk, camera, metrics, logger):
                     "pitch": getattr(pixhawk, "pitch", 0.0),
                     "yaw": getattr(pixhawk, "yaw", 0.0)
                 },
-                "imu_accel": pixhawk.imu_accel,     # dict x,y,z
+                "imu_accel": pixhawk.imu_accel,
                 "gps": {
                     "lat": pixhawk.position["lat"],
                     "lon": pixhawk.position["lon"],
@@ -266,7 +316,7 @@ def main_loop(pixhawk, camera, metrics, logger):
                 "waypoint_alt": pixhawk.get_waypoint_alt(pixhawk.last_wp),
                 "flight_mode": pixhawk.mode,
                 "nav_state": pixhawk.nav_state,
-                "is_hovering": pixhawk.is_hovering(threshold=0.6),  # Add hover flag
+                "is_hovering": pixhawk.is_hovering(threshold=0.6),
                 "battery": {
                     "voltage": pixhawk.battery_voltage,
                     "current": pixhawk.battery_current,

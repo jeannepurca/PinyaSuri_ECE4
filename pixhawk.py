@@ -313,7 +313,8 @@ class Pixhawk:
     def clear_waypoint_log(self):
         """Clear the waypoint log (call when disarmed/new flight)"""
         self.wp_reached_log.clear()
-        logger.debug("✓ Cleared waypoint reached log.")
+        self.altitude_history.clear()
+        logger.debug("✓ Cleared waypoint & altitude history.")
 
     # ---------------------------------------------------------
     # SAFETY / HEALTH
