@@ -222,8 +222,40 @@ def is_drone_in_air(pixhawk):
     
     return pixhawk.position["rel_alt"] >= config.MIN_ALTITUDE_FOR_CAPTURE
 
-def should_capture_image(pixhawk, waypoint, captured_wp, logger):
+def should_capture_image(pixhawk, waypoint, captured_wp, logger, last_check_state=None):
     """Check if conditions are met for image capture"""
+
+    # Only log for mapping waypoints
+    if not waypoint or not config.is_mapping_waypoint(waypoint):
+        return False
+    
+    # Build current state
+    current_state = {
+        'armed': pixhawk.armed,
+        'has_position': bool(pixhawk.position),
+        'in_air': is_drone_in_air(pixhawk) if pixhawk.position else False,
+        'already_captured': waypoint in captured_wp,
+        'hovering': pixhawk.is_hovering(threshold=config.HOVER_SPEED_THRESHOLD),
+        'alt_stable': pixhawk.is_altitude_stable(threshold=config.ALTITUDE_STABILITY_THRESHOLD, window_size=5),
+        'in_reached_log': waypoint in pixhawk.wp_reached_log,
+        'current_wp_match': pixhawk.last_wp == waypoint,
+        'groundspeed': pixhawk.groundspeed,
+        'alt_variation': pixhawk.get_altitude_variation()
+    }
+    
+    # Check if state changed (or first check for this waypoint)
+    state_changed = (
+        last_check_state is None or 
+        waypoint not in last_check_state or 
+        last_check_state.get(waypoint) != current_state
+    )
+    
+    # Store current state
+    if last_check_state is not None:
+        last_check_state[waypoint] = current_state.copy()
+    
+    # Only log if state changed OR it's the first attempt
+    verbose = state_changed
 
     debug_msg = f"[CAPTURE CHECK WP{waypoint}]"
 
@@ -290,6 +322,7 @@ def main_loop(pixhawk, camera, metrics, logger):
     flight_number = metrics.flight_number
     was_armed = False
     current_mode = "UNKNOWN"
+    last_check_state = {}
     
     logger.info("=" * 60)
     logger.info("🍍 PINYASURI FLIGHT SYSTEM READY! 🚁")
@@ -342,7 +375,7 @@ def main_loop(pixhawk, camera, metrics, logger):
 
         
         # Check for image capture
-        if should_capture_image(pixhawk, pixhawk.last_wp, captured_wp, logger):
+        if should_capture_image(pixhawk, pixhawk.last_wp, captured_wp, logger, last_check_state):
             handle_waypoint_capture(
                 pixhawk, camera, metrics, 
                 pixhawk.last_wp, flight_number, captured_wp, logger
