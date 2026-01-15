@@ -250,11 +250,6 @@ def should_capture_image(pixhawk, waypoint, captured_wp, logger):
     if not config.is_mapping_waypoint(waypoint):
         logger.debug(f"⚠ {config.get_waypoint_name(waypoint)} is not a mapping waypoint")
         return False
-
-    # 9. Must reached the verified waypoint
-    if waypoint not in pixhawk.wp_reached_log:
-        logger.debug(f"⚠ {config.get_waypoint_name(waypoint)} not confirmed reached yet")
-        return False
     
     # All checks passed!
     logger.info(f"✓ All capture conditions met for {config.get_waypoint_name(waypoint)}!")
