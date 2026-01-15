@@ -204,8 +204,8 @@ class Pixhawk:
                 new_wp = msg.seq
                 if 0 <= new_wp <= 255:
                     if self.last_wp != new_wp:
-                        logger.debug(f"> Waypoint changed: {self.last_wp} -> {new_wp}")
-                    self.last_wp = new_wp
+                        logger.info(f"> Waypoint changed: {self.last_wp} -> {new_wp}")
+                        self.last_wp = new_wp
 
             # -------------------------------
             # WAYPOINT REACHED EVENT
