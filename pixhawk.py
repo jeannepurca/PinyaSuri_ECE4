@@ -25,7 +25,7 @@ class Pixhawk:
 
         # Sensors
         self.imu_accel = {"x": 0.0, "y": 0.0, "z": 0.0}
-        self.battery_remaining = 0  # Changed from None to 0
+        self.battery_remaining = None
         self.battery_type = None
         self.groundspeed = 0.0
 
@@ -47,9 +47,6 @@ class Pixhawk:
         self.battery_voltage = 0.0
         self.battery_current = 0.0
         self.nav_state = "UNKNOWN"
-        
-        # Battery message tracking
-        self.last_battery_msg_time = None
 
     def get_waypoint_lat(self, wp_num):
         """Get waypoint latitude from mission"""
@@ -124,6 +121,8 @@ class Pixhawk:
 
         # Mission/Waypoints
         self._request_message(mavutil.mavlink.MAVLINK_MSG_ID_MISSION_CURRENT, 5)
+
+        # Request waypoint reached messages at higher rate
         self._request_message(mavutil.mavlink.MAVLINK_MSG_ID_MISSION_ITEM_REACHED, 5)
 
         # Position & Altitude
@@ -132,22 +131,9 @@ class Pixhawk:
         # Attitude
         self._request_message(mavutil.mavlink.MAVLINK_MSG_ID_ATTITUDE, 50)
 
-        # Battery - increased rate for better monitoring
-        self._request_message(mavutil.mavlink.MAVLINK_MSG_ID_BATTERY_STATUS, 2)
-        self._request_message(mavutil.mavlink.MAVLINK_MSG_ID_SYS_STATUS, 2)
-        
-        # ArduPilot compatibility - request extended status stream
-        try:
-            self.master.mav.request_data_stream_send(
-                self.master.target_system,
-                self.master.target_component,
-                mavutil.mavlink.MAV_DATA_STREAM_EXTENDED_STATUS,
-                2,  # 2 Hz
-                1   # Start streaming
-            )
-            logger.info(">>> Requested EXTENDED_STATUS stream (battery fallback)")
-        except Exception as e:
-            logger.warning(f"Could not request data stream: {e}")
+        # Battery
+        self._request_message(mavutil.mavlink.MAVLINK_MSG_ID_BATTERY_STATUS, 1)
+        self._request_message(mavutil.mavlink.MAVLINK_MSG_ID_SYS_STATUS, 1)
 
         # IMU Data
         self._request_message(mavutil.mavlink.MAVLINK_MSG_ID_RAW_IMU, 5)
@@ -173,6 +159,7 @@ class Pixhawk:
             # POSITION
             # -------------------------------
             if msg_type == "GLOBAL_POSITION_INT":
+                # FIX: Validate position data before using
                 lat = msg.lat / 1e7
                 lon = msg.lon / 1e7
                 
@@ -243,48 +230,28 @@ class Pixhawk:
             # BATTERY (preferred)
             # -------------------------------
             elif msg_type == "BATTERY_STATUS":
-                self.last_battery_msg_time = time.time()
-                
-                # Log first battery message received
-                if self.battery_type is None:
-                    logger.info(f"✓ Battery monitoring active (BATTERY_STATUS)")
-                
-                # Update voltage
-                if msg.voltages and len(msg.voltages) > 0:
-                    self.battery_voltage = msg.voltages[0] / 1000.0  # mV to V
-                
-                # Update current
-                if msg.current_battery != -1:
-                    self.battery_current = msg.current_battery / 100.0  # cA to A
-                
-                # Update percentage
                 if msg.battery_remaining != -1:
                     self.battery_remaining = msg.battery_remaining
                     self.battery_type = "percent"
-                    logger.debug(f"Battery: {self.battery_remaining}%, {self.battery_voltage:.2f}V, {self.battery_current:.2f}A")
+                    self.battery_voltage = msg.voltages[0] / 1000.0 if msg.voltages else 0.0
+                    self.battery_current = msg.current_battery / 100.0 if msg.current_battery != -1 else 0.0
+                if msg.voltages and len(msg.voltages) > 0:
+                    self.battery_voltage = msg.voltages[0] / 1000.0  # mV to V
+                if msg.current_battery != -1:
+                    self.battery_current = msg.current_battery / 100.0  # cA to A
 
             # -------------------------------
             # BATTERY (fallback)
             # -------------------------------
             elif msg_type == "SYS_STATUS":
-                # Only use as fallback if we haven't received BATTERY_STATUS
-                if self.battery_type is None:
-                    logger.info(f"✓ Battery monitoring active (SYS_STATUS fallback)")
-                    self.battery_type = "sys_status"
-                
-                # Update percentage from SYS_STATUS if not set
-                if hasattr(msg, "battery_remaining") and msg.battery_remaining != -1:
-                    if self.battery_remaining == 0:  # Only update if we don't have data
-                        self.battery_remaining = msg.battery_remaining
-                        logger.debug(f"Battery (SYS_STATUS): {self.battery_remaining}%")
-                
-                # Update voltage if not set
+                if self.battery_remaining is None and hasattr(msg, "battery_remaining"):
+                    self.battery_remaining = msg.battery_remaining
+                    self.battery_type = "percent"
                 if hasattr(msg, "voltage_battery") and self.battery_voltage == 0.0:
                     self.battery_voltage = msg.voltage_battery / 1000.0  # mV to V
-                
-                # Update current if not set
                 if hasattr(msg, "current_battery") and self.battery_current == 0.0:
                     self.battery_current = msg.current_battery / 100.0  # cA to A
+
 
     # ---------------------------------------------------------
     # Attitude Getters (for gimbal)
@@ -313,44 +280,41 @@ class Pixhawk:
         """Check if drone is hovering (horizontal velocity < threshold m/s)"""
         return self.groundspeed < threshold
     
-    def is_altitude_stable(self, threshold=config.HOVER_SPEED_THRESHOLD, window_size=3):
-        """Check if altitude is stable (not changing rapidly)"""
+    def is_altitude_stable(self, threshold=0.5, window_size=7):
+        """
+        Check if altitude is stable (not changing rapidly).
+        
+        Args:
+            threshold: Maximum acceptable altitude variation in meters
+            window_size: Number of recent samples to check
+        
+        Returns:
+            True if altitude variation is within threshold
+        """
         if len(self.altitude_history) < window_size:
             return False
+        
+        # Get recent altitude samples
         recent_altitudes = list(self.altitude_history)[-window_size:]
+        
+        # Calculate variation (max - min)
         variation = max(recent_altitudes) - min(recent_altitudes)
+        
         return variation <= threshold
     
     def get_altitude_variation(self):
         """Get current altitude variation for debugging"""
         if len(self.altitude_history) < 2:
             return 0.0
+        
         recent_altitudes = list(self.altitude_history)
         return max(recent_altitudes) - min(recent_altitudes)
     
     def clear_waypoint_log(self):
-        """Clear the waypoint log"""
+        """Clear the waypoint log (call when disarmed/new flight)"""
         self.wp_reached_log.clear()
-        logger.debug("✓ Cleared waypoint reached log.")
-
-    # ---------------------------------------------------------
-    # Battery Health Check
-    # ---------------------------------------------------------
-    def battery_data_ok(self, timeout=5.0):
-        """Returns False if battery data is stale or unavailable"""
-        if self.last_battery_msg_time is None:
-            return False
-        return (time.time() - self.last_battery_msg_time) < timeout
-    
-    def get_battery_status(self):
-        """Get current battery status as a dict"""
-        return {
-            "voltage": self.battery_voltage,
-            "current": self.battery_current,
-            "percentage": self.battery_remaining,
-            "type": self.battery_type,
-            "data_age": time.time() - self.last_battery_msg_time if self.last_battery_msg_time else None
-        }
+        self.altitude_history.clear()
+        logger.debug("✓ Cleared waypoint & altitude history.")
 
     # ---------------------------------------------------------
     # SAFETY / HEALTH
