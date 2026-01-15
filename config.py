@@ -42,7 +42,7 @@ FLIGHT_LOG_FILE = get_flight_log_file()
 # Stability thresholds
 HOVER_SPEED_THRESHOLD = 1.5  # m/s
 ALTITUDE_STABILITY_THRESHOLD = 1.5  # m
-STABILITY_WAIT_TIME = 6.0  # seconds
+STABILITY_WAIT_TIME = 2.0  # seconds
 STABILITY_CHECK_INTERVAL = 0.2  # seconds
 STABILITY_CHECKS_NEEDED = 2
 
@@ -102,6 +102,7 @@ MAIN_LOOP_INTERVAL = 0.05  # seconds
 METRICS_LOG_INTERVAL = 0.5  # seconds
 METRICS_WINDOW_SIZE = 10
 
+<<<<<<< HEAD
 
 # ============================================================================  
 # BURST CAPTURE CONFIGURATION  
@@ -111,6 +112,8 @@ BURST_INTERVAL = 0.15  # Seconds between captures
 BURST_STABILIZATION_DELAY = 0.2  # Extra delay if instability detected during burst
 
 
+=======
+>>>>>>> parent of 405267d (change to multiple capture per waypoint)
 # ============================================================================  
 # AI CONFIGURATION  
 # ============================================================================  
@@ -127,4 +130,4 @@ CLASS_NAMES = {
 }
 
 def get_class_name(index: int) -> str:
-    return CLASS_NAMES.get(index, f"unknown_{index}")
+    return CLASS_NAMES.get(index, f"unknown_{index}")  # ✓ Added 'S'

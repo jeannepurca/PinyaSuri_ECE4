@@ -59,57 +59,50 @@ def log_image_capture(flight_id, flight_number, waypoint, position, burst_id, bu
         logger.error(f"Failed to log image capture to CSV: {e}")
 
 # ----------------------------
-# Capture handler
+# Capture handler - IMMEDIATE TRIGGER VERSION
 # ----------------------------
 def handle_waypoint_capture(pixhawk, camera, metrics, waypoint, flight_number, captured_wp, logger):
-    """Capture burst images at waypoint with stability monitoring"""
+    """Capture burst images at waypoint - called IMMEDIATELY on waypoint confirmation"""
     if waypoint in captured_wp:
         return False
         
     wp_name = config.get_waypoint_name(waypoint)
     logger.info("=" * 60)
-    logger.info(f">>> {wp_name} (WP{waypoint}) REACHED - Capturing burst images...")
+    logger.info(f">>> {wp_name} (WP{waypoint}) CONFIRMED - Starting capture sequence...")
     logger.info("=" * 60)
 
-    # Wait until drone stabilizes
-    stable_count = 0
-    elapsed = 0.0
+    # Immediate first capture attempt (don't wait for perfect stability)
+    # The drone is AT the waypoint right now, so capture while we can!
     
-    logger.info(">>> Waiting for drone to stabilize...")
-
-    while elapsed < config.STABILITY_WAIT_TIME:
-        time.sleep(config.STABILITY_CHECK_INTERVAL)
-        elapsed += config.STABILITY_CHECK_INTERVAL
+    stable_count = 0
+    max_attempts = 3  # Quick checks before giving up
+    
+    for attempt in range(max_attempts):
         pixhawk.update()
-
-        # Check if drone is stable
+        
         is_hovering = pixhawk.is_hovering(threshold=config.HOVER_SPEED_THRESHOLD)
         is_alt_stable = pixhawk.is_altitude_stable(threshold=config.ALTITUDE_STABILITY_THRESHOLD, window_size=3)
-
+        
         if is_hovering and is_alt_stable:
             stable_count += 1
-            logger.info(f"  ✓ Stable check {stable_count}/{config.STABILITY_CHECKS_NEEDED} "
+            logger.info(f"  ✓ Stability check {stable_count} passed "
                        f"(speed: {pixhawk.groundspeed:.2f} m/s, "
                        f"alt var: {pixhawk.get_altitude_variation():.2f} m)")
-            
-            if stable_count >= config.STABILITY_CHECKS_NEEDED:
-                logger.info(f"✓ Drone stabilized after {elapsed:.1f}s - Capturing now!")
-                break
+            break  # Good enough, capture now!
         else:
-            # DON'T reset counter - allow gradual stabilization
-            logger.info(f"  ○ Stabilizing... (speed: {pixhawk.groundspeed:.2f} m/s, alt var: {pixhawk.get_altitude_variation():.2f}m)")
+            logger.info(f"  ○ Quick check {attempt+1}/{max_attempts} "
+                       f"(speed: {pixhawk.groundspeed:.2f} m/s, "
+                       f"alt var: {pixhawk.get_altitude_variation():.2f} m)")
+            time.sleep(0.3)  # Brief pause
 
-    # MODIFIED: Capture even if not perfectly stable
-    if stable_count >= 1:  # At least ONE stable reading
-        logger.info(f"✓ Proceeding with capture (stability: {stable_count}/{config.STABILITY_CHECKS_NEEDED})")
+    # If we got at least one stable reading, proceed
+    if stable_count >= 1:
+        logger.info(f"✓ Proceeding with capture immediately!")
     else:
-        logger.warning(f"⚠ Could not achieve stable hover after {elapsed:.1f}s")
-        logger.warning(f"  Current speed: {pixhawk.groundspeed:.2f} m/s")
-        logger.warning(f"  Altitude variation: {pixhawk.get_altitude_variation():.2f} m")
-        logger.warning("  Skipping capture this attempt.")
-        return False
+        logger.warning(f"⚠ No stable readings in quick checks, capturing anyway (best effort)")
+        # Still capture - we're at the waypoint NOW
 
-    # Burst capture with stability monitoring
+    # Burst capture
     num_captures = config.BURST_CAPTURE_COUNT
     burst_interval = config.BURST_INTERVAL
     captured_images = []
@@ -118,13 +111,12 @@ def handle_waypoint_capture(pixhawk, camera, metrics, waypoint, flight_number, c
     logger.info(f"📸 Starting burst capture ({num_captures} frames)...")
 
     for i in range(num_captures):
-        # Quick stability check between frames (except first)
+        # Quick stability check between frames
         if i > 0:
-            pixhawk.update()  # Get latest telemetry
+            pixhawk.update()
             
-            if not pixhawk.is_hovering(threshold=0.6):
-                logger.warning(f"⚠ Instability detected at frame {i+1} (speed: {pixhawk.groundspeed:.2f} m/s)")
-                # Add extra settling time
+            if not pixhawk.is_hovering(threshold=config.HOVER_SPEED_THRESHOLD * 1.5):
+                logger.warning(f"⚠ Movement detected at frame {i+1} (speed: {pixhawk.groundspeed:.2f} m/s)")
                 time.sleep(config.BURST_STABILIZATION_DELAY)
         
         try:
@@ -135,11 +127,10 @@ def handle_waypoint_capture(pixhawk, camera, metrics, waypoint, flight_number, c
                 burst_index=i
             )
             
-            # Verify file was written and has valid size
+            # Verify file
             if Path(image_path).exists() and Path(image_path).stat().st_size > 1000:
                 captured_images.append(image_path)
                 
-                # Log with burst metadata
                 log_image_capture(
                     metrics.flight_id, 
                     flight_number, 
@@ -157,7 +148,7 @@ def handle_waypoint_capture(pixhawk, camera, metrics, waypoint, flight_number, c
             else:
                 logger.error(f"⚠ Frame {i+1} file invalid or too small")
             
-            if i < num_captures - 1:  # Don't wait after last image
+            if i < num_captures - 1:
                 time.sleep(burst_interval)
                 
         except Exception as e:
@@ -216,11 +207,10 @@ def is_drone_in_air(pixhawk):
     return pixhawk.position["rel_alt"] >= config.MIN_ALTITUDE_FOR_CAPTURE
 
 def should_capture_image(pixhawk, waypoint, captured_wp, logger):
-    """Check if conditions are met for image capture"""
-
-    # ========================================
-    # PHASE 1: QUICK FILTERS (No delays)
-    # ========================================
+    """
+    SIMPLIFIED: Check if we should trigger capture.
+    Stability checks REMOVED - we capture immediately on waypoint confirmation!
+    """
 
     # 1. Must be armed
     if not pixhawk.armed:
@@ -232,10 +222,9 @@ def should_capture_image(pixhawk, waypoint, captured_wp, logger):
     
     # 3. Must have position data from GPS
     if not pixhawk.position:
-        logger.debug("⚠ Cannot capture: no position data yet!")
         return False
     
-    # 4. Must be in the air (altitude >= MIN_ALTITUDE_FOR_CAPTURE)
+    # 4. Must be in the air
     if not is_drone_in_air(pixhawk):
         return False
     
@@ -247,31 +236,11 @@ def should_capture_image(pixhawk, waypoint, captured_wp, logger):
     if not config.is_mapping_waypoint(waypoint):
         return False
 
-    # ========================================
-    # PHASE 2: WAYPOINT CONFIRMATION (MOVED UP!)
-    # ========================================
-
-    # 9. Must reached the verified waypoint
+    # 7. CRITICAL: Waypoint must be CONFIRMED reached
     if waypoint not in pixhawk.wp_reached_log:
-        logger.debug(f"⚠ {config.get_waypoint_name(waypoint)} not confirmed reached yet")
         return False
 
-    # ========================================
-    # PHASE 3: STABILITY CHECKS (Last, after waypoint confirmed)
-    # ========================================
-
-    # 7. RELAXED hover detection for outdoor conditions
-    if not pixhawk.is_hovering(threshold=config.HOVER_SPEED_THRESHOLD):
-        logger.debug(f"⚠ Still moving at {pixhawk.groundspeed:.2f} m/s")
-        return False
-    
-    # 8. RELAXED altitude stability check
-    if not pixhawk.is_altitude_stable(threshold=config.ALTITUDE_STABILITY_THRESHOLD, window_size=3):
-        logger.debug(f"⚠ Altitude not stable: {pixhawk.get_altitude_variation():.2f} m variation")
-        return False
-
-    # All checks passed!
-    logger.info(f"✓ All capture conditions met for {config.get_waypoint_name(waypoint)}!")
+    # All checks passed - trigger capture IMMEDIATELY!
     return True
 
 def main_loop(pixhawk, camera, metrics, logger):
@@ -330,12 +299,13 @@ def main_loop(pixhawk, camera, metrics, logger):
             metrics.log_telemetry(telemetry)
 
         
-        # Check for image capture
+        # IMMEDIATE CAPTURE TRIGGER: Check every loop iteration
         if should_capture_image(pixhawk, pixhawk.last_wp, captured_wp, logger):
             handle_waypoint_capture(
                 pixhawk, camera, metrics, 
                 pixhawk.last_wp, flight_number, captured_wp, logger
             )
+        
         time.sleep(config.MAIN_LOOP_INTERVAL)
     return was_armed
 

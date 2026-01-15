@@ -331,8 +331,7 @@ class Pixhawk:
     def clear_waypoint_log(self):
         """Clear the waypoint log"""
         self.wp_reached_log.clear()
-        self.altitude_history.clear()
-        logger.debug("✓ Cleared waypoint & altitude history.")
+        logger.debug("✓ Cleared waypoint reached log.")
 
     # ---------------------------------------------------------
     # Battery Health Check
