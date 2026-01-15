@@ -76,7 +76,7 @@ def handle_waypoint_capture(pixhawk, camera, metrics, waypoint, flight_number, c
     elapsed = 0.0
     
     logger.info(">>> Waiting for drone to stabilize...")
-    
+
     while elapsed < config.STABILITY_WAIT_TIME:
         time.sleep(config.STABILITY_CHECK_INTERVAL)
         elapsed += config.STABILITY_CHECK_INTERVAL
@@ -96,18 +96,16 @@ def handle_waypoint_capture(pixhawk, camera, metrics, waypoint, flight_number, c
                 logger.info(f"✓ Drone stabilized after {elapsed:.1f}s - Capturing now!")
                 break
         else:
-            # Reset counter if drone becomes unstable
-            if stable_count > 0:
-                logger.debug(f"  ○ Lost stability - rechecking... "
-                           f"(speed: {pixhawk.groundspeed:.2f} m/s)")
-            stable_count = 0
+            # DON'T reset counter - allow gradual stabilization
+            logger.info(f"  ○ Stabilizing... (speed: {pixhawk.groundspeed:.2f} m/s, alt var: {pixhawk.get_altitude_variation():.2f}m)")
 
-    # Check if we achieved stability
-    if stable_count < config.STABILITY_CHECKS_NEEDED:
+    # MODIFIED: Capture even if not perfectly stable
+    if stable_count >= 1:  # At least ONE stable reading
+        logger.info(f"✓ Proceeding with capture (stability: {stable_count}/{config.STABILITY_CHECKS_NEEDED})")
+    else:
         logger.warning(f"⚠ Could not achieve stable hover after {elapsed:.1f}s")
         logger.warning(f"  Current speed: {pixhawk.groundspeed:.2f} m/s")
         logger.warning(f"  Altitude variation: {pixhawk.get_altitude_variation():.2f} m")
-        logger.warning(f"  Mission Planner will hold for {config.STABILITY_WAIT_TIME - elapsed:.1f}s more")
         logger.warning("  Skipping capture this attempt.")
         return False
 

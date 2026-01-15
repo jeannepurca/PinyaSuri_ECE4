@@ -40,11 +40,11 @@ FLIGHT_LOG_FILE = get_flight_log_file()
 
 
 # Stability thresholds
-HOVER_SPEED_THRESHOLD = 1.0  # m/s
-ALTITUDE_STABILITY_THRESHOLD = 1.0  # m
-STABILITY_WAIT_TIME = 3.0  # seconds
-STABILITY_CHECK_INTERVAL = 0.1  # seconds
-STABILITY_CHECKS_NEEDED = 3
+HOVER_SPEED_THRESHOLD = 1.5  # m/s
+ALTITUDE_STABILITY_THRESHOLD = 1.5  # m
+STABILITY_WAIT_TIME = 6.0  # seconds
+STABILITY_CHECK_INTERVAL = 0.2  # seconds
+STABILITY_CHECKS_NEEDED = 2
 
 # ============================================================================  
 # IMAGE CAPTURE DIRECTORY (daily subfolders)  
