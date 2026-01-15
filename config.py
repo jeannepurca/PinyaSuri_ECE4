@@ -102,7 +102,6 @@ MAIN_LOOP_INTERVAL = 0.05  # seconds
 METRICS_LOG_INTERVAL = 0.5  # seconds
 METRICS_WINDOW_SIZE = 10
 
-<<<<<<< HEAD
 
 # ============================================================================  
 # BURST CAPTURE CONFIGURATION  
@@ -112,8 +111,6 @@ BURST_INTERVAL = 0.15  # Seconds between captures
 BURST_STABILIZATION_DELAY = 0.2  # Extra delay if instability detected during burst
 
 
-=======
->>>>>>> parent of 405267d (change to multiple capture per waypoint)
 # ============================================================================  
 # AI CONFIGURATION  
 # ============================================================================  
