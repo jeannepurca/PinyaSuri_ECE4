@@ -244,7 +244,22 @@ def should_capture_image(pixhawk, waypoint, captured_wp, logger):
     # 6. Must capture only at survey/mapping waypoints
     if not config.is_mapping_waypoint(waypoint):
         return False
+
+    # 7. RELAXED hover detection for outdoor conditions
+    if not pixhawk.is_hovering(threshold=config.HOVER_SPEED_THRESHOLD):
+        logger.debug(f"⚠ Still moving at {pixhawk.groundspeed:.2f} m/s")
+        return False
     
+    # 8. RELAXED altitude stability check
+    if not pixhawk.is_altitude_stable(threshold=config.ALTITUDE_STABILITY_THRESHOLD, window_size=5):
+        logger.debug(f"⚠ Altitude not stable: {pixhawk.get_altitude_variation():.2f} m variation")
+        return False
+
+    # 9. Must reached the verified waypoint
+    if waypoint not in pixhawk.wp_reached_log:
+        logger.debug(f"⚠ {config.get_waypoint_name(waypoint)} not confirmed reached yet")
+        return False
+
     # All checks passed!
     logger.info(f"✓ All capture conditions met for {config.get_waypoint_name(waypoint)}!")
     return True
