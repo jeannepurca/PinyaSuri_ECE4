@@ -125,7 +125,7 @@ def handle_waypoint_capture(pixhawk, camera, metrics, waypoint, flight_number, c
     logger.info(f"📸 Starting burst capture ({num_captures} frames)...")
 
     for i in range(num_captures):
-        # Quick stability check between frames (except first)
+        # Quick stability check between frames
         if i > 0:
             pixhawk.update()  # Get latest telemetry
             
@@ -225,37 +225,62 @@ def is_drone_in_air(pixhawk):
 def should_capture_image(pixhawk, waypoint, captured_wp, logger):
     """Check if conditions are met for image capture"""
 
+    debug_msg = f"[CAPTURE CHECK WP{waypoint}]"
+
     # 1. Must be armed
     if not pixhawk.armed:
+        logger.info(f"{debug_msg} ✗ Not armed")
         return False
+    logger.info(f"{debug_msg} ✓ Armed")
     
     # 2. Must have valid waypoint
     if not waypoint:
+        logger.info(f"{debug_msg} ✗ No waypoint")
         return False
-    
+    logger.info(f"{debug_msg} ✓ Valid Waypoint")
+
     # 3. Must have position data from GPS
     if not pixhawk.position:
-        logger.debug("⚠ Cannot capture: no position data yet!")
+        logger.info(f"{debug_msg} ✗ No position data")
         return False
+    logger.info(f"{debug_msg} ✓ Has position")
     
     # 4. Must be in the air (altitude >= MIN_ALTITUDE_FOR_CAPTURE)
     if not is_drone_in_air(pixhawk):
+        logger.info(f"{debug_msg} ✗ Not in air (alt: {pixhawk.position['rel_alt']:.2f}m)")
         return False
+    logger.info(f"{debug_msg} ✓ In air (alt: {pixhawk.position['rel_alt']:.2f}m)")
     
     # 5. Must NOT have already captured this waypoint
     if waypoint in captured_wp:
+        logger.info(f"{debug_msg} ✗ Already captured")
         return False
+    logger.info(f"{debug_msg} ✓ Not yet captured")
     
     # 6. Must capture only at survey/mapping waypoints
     if not config.is_mapping_waypoint(waypoint):
-        logger.debug(f"⚠ {config.get_waypoint_name(waypoint)} is not a mapping waypoint")
+        logger.info(f"{debug_msg} ✗ Not a mapping waypoint")
         return False
+    logger.info(f"{debug_msg} ✓ Is mapping waypoint")
 
     # 9. Must reached the verified waypoint
     if waypoint not in pixhawk.wp_reached_log:
-        logger.debug(f"⚠ {config.get_waypoint_name(waypoint)} not confirmed reached yet")
+        logger.info(f"⚠ {config.get_waypoint_name(waypoint)} not confirmed reached yet")
         return False
     
+    # 7. RELAXED hover detection
+    if not pixhawk.is_hovering(threshold=config.HOVER_SPEED_THRESHOLD):
+        logger.info(f"{debug_msg} ✗ Still moving (speed: {pixhawk.groundspeed:.2f} m/s, threshold: {config.HOVER_SPEED_THRESHOLD})")
+        return False
+    logger.info(f"{debug_msg} ✓ Hovering (speed: {pixhawk.groundspeed:.2f} m/s)")
+
+    # 8. RELAXED altitude stability check
+    alt_var = pixhawk.get_altitude_variation()
+    if not pixhawk.is_altitude_stable(threshold=config.ALTITUDE_STABILITY_THRESHOLD, window_size=5):
+        logger.info(f"{debug_msg} ✗ Altitude unstable (var: {alt_var:.2f} m, threshold: {config.ALTITUDE_STABILITY_THRESHOLD})")
+        return False
+    logger.info(f"{debug_msg} ✓ Altitude stable (var: {alt_var:.2f} m)")
+
     # All checks passed!
     logger.info(f"✓ All capture conditions met for {config.get_waypoint_name(waypoint)}!")
     return True
