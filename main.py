@@ -72,9 +72,9 @@ def handle_waypoint_capture(pixhawk, camera, metrics, waypoint, flight_number, c
     # Wait until drone stabilizes
     stable_count = 0
     elapsed = 0.0
-    max_wait_time = 6.0
-    check_interval = 0.4
-    stable_checks_needed = 2
+    max_wait_time = config.STABILITY_WAIT_TIME
+    check_interval = config.STABILITY_CHECK_INTERVAL
+    stable_checks_needed = config.STABILITY_CHECKS_NEEDED
     
     # Relaxed thresholds for outdoor conditions
     speed_threshold = 0.6  # m/s (forgiving for wind)
