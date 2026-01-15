@@ -84,7 +84,7 @@ def handle_waypoint_capture(pixhawk, camera, metrics, waypoint, flight_number, c
 
         # Check if drone is stable
         is_hovering = pixhawk.is_hovering(threshold=config.HOVER_SPEED_THRESHOLD)
-        is_alt_stable = pixhawk.is_altitude_stable(threshold=config.ALTITUDE_STABILITY_THRESHOLD, window_size=5)
+        is_alt_stable = pixhawk.is_altitude_stable(threshold=config.ALTITUDE_STABILITY_THRESHOLD, window_size=3)
 
         if is_hovering and is_alt_stable:
             stable_count += 1
@@ -220,6 +220,10 @@ def is_drone_in_air(pixhawk):
 def should_capture_image(pixhawk, waypoint, captured_wp, logger):
     """Check if conditions are met for image capture"""
 
+    # ========================================
+    # PHASE 1: QUICK FILTERS (No delays)
+    # ========================================
+
     # 1. Must be armed
     if not pixhawk.armed:
         return False
@@ -245,19 +249,27 @@ def should_capture_image(pixhawk, waypoint, captured_wp, logger):
     if not config.is_mapping_waypoint(waypoint):
         return False
 
+    # ========================================
+    # PHASE 2: WAYPOINT CONFIRMATION (MOVED UP!)
+    # ========================================
+
+    # 9. Must reached the verified waypoint
+    if waypoint not in pixhawk.wp_reached_log:
+        logger.debug(f"⚠ {config.get_waypoint_name(waypoint)} not confirmed reached yet")
+        return False
+
+    # ========================================
+    # PHASE 3: STABILITY CHECKS (Last, after waypoint confirmed)
+    # ========================================
+
     # 7. RELAXED hover detection for outdoor conditions
     if not pixhawk.is_hovering(threshold=config.HOVER_SPEED_THRESHOLD):
         logger.debug(f"⚠ Still moving at {pixhawk.groundspeed:.2f} m/s")
         return False
     
     # 8. RELAXED altitude stability check
-    if not pixhawk.is_altitude_stable(threshold=config.ALTITUDE_STABILITY_THRESHOLD, window_size=5):
+    if not pixhawk.is_altitude_stable(threshold=config.ALTITUDE_STABILITY_THRESHOLD, window_size=3):
         logger.debug(f"⚠ Altitude not stable: {pixhawk.get_altitude_variation():.2f} m variation")
-        return False
-
-    # 9. Must reached the verified waypoint
-    if waypoint not in pixhawk.wp_reached_log:
-        logger.debug(f"⚠ {config.get_waypoint_name(waypoint)} not confirmed reached yet")
         return False
 
     # All checks passed!

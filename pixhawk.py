@@ -313,7 +313,7 @@ class Pixhawk:
         """Check if drone is hovering (horizontal velocity < threshold m/s)"""
         return self.groundspeed < threshold
     
-    def is_altitude_stable(self, threshold=0.5, window_size=7):
+    def is_altitude_stable(self, threshold=config.HOVER_SPEED_THRESHOLD, window_size=3):
         """Check if altitude is stable (not changing rapidly)"""
         if len(self.altitude_history) < window_size:
             return False
