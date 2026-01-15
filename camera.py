@@ -24,21 +24,18 @@ class Camera:
             raise
 
     # Capture Image and Save to File
-    def capture(self, waypoint: int, flight_number: int = 1, prefix="img"):
+    def capture(self, waypoint: int, flight_number: int = 1, prefix="img", burst_index=0):
         """Capture image and save to today's date folder"""
-        # Get today's folder
         date_folder = config.get_image_day_dir()
-
-        # Timestamp for filename
         ts = datetime.utcnow().strftime("%Y%m%dT%H%M%S%f")[:-3]
-        filename = f"{prefix}_flight{flight_number}_wp{waypoint}_{ts}.jpg"
+        
+        # Include burst_index in filename
+        filename = f"{prefix}_flight{flight_number}_wp{waypoint}_burst{burst_index}_{ts}.jpg"
         fullpath = date_folder / filename
 
-        # Capture the image
         self.picam2.capture_file(str(fullpath))
         logger.info(f"✓ Captured {filename} in folder {date_folder.name}")
 
-        # Return full path as string
         return str(fullpath)
 
     def close(self):

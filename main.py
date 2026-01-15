@@ -63,51 +63,26 @@ def log_image_capture(flight_id, flight_number, waypoint, position, burst_id, bu
 # ----------------------------
 def handle_waypoint_capture(pixhawk, camera, metrics, waypoint, flight_number, captured_wp, logger):
     """Capture burst images at waypoint - called IMMEDIATELY on waypoint confirmation"""
-    if waypoint in captured_wp:
-        return False
         
     wp_name = config.get_waypoint_name(waypoint)
     logger.info("=" * 60)
     logger.info(f">>> {wp_name} (WP{waypoint}) CONFIRMED - Starting capture sequence...")
     logger.info("=" * 60)
 
-    # Immediate first capture attempt (don't wait for perfect stability)
-    # The drone is AT the waypoint right now, so capture while we can!
-    
-    stable_count = 0
-    max_attempts = 3  # Quick checks before giving up
-    
-    logger.info(">>> Waiting for drone to stabilize...")
+    # Mark as captured immediately to prevent duplicate triggers
+    captured_wp.add(waypoint)
 
-    while elapsed < config.STABILITY_WAIT_TIME:
-        time.sleep(config.STABILITY_CHECK_INTERVAL)
-        elapsed += config.STABILITY_CHECK_INTERVAL
-        pixhawk.update()
-        
-        is_hovering = pixhawk.is_hovering(threshold=config.HOVER_SPEED_THRESHOLD)
-        is_alt_stable = pixhawk.is_altitude_stable(threshold=config.ALTITUDE_STABILITY_THRESHOLD, window_size=3)
-        
-        if is_hovering and is_alt_stable:
-            stable_count += 1
-            logger.info(f"  ✓ Stability check {stable_count} passed "
-                       f"(speed: {pixhawk.groundspeed:.2f} m/s, "
-                       f"alt var: {pixhawk.get_altitude_variation():.2f} m)")
-            break  # Good enough, capture now!
-        else:
-            # DON'T reset counter - allow gradual stabilization
-            logger.info(f"  ○ Stabilizing... (speed: {pixhawk.groundspeed:.2f} m/s, alt var: {pixhawk.get_altitude_variation():.2f}m)")
+    # Short delay to let drone settle (optional)
+    logger.info(">>> Brief stabilization pause...")
+    time.sleep(1.0)  # 1 second pause
+    pixhawk.update()  # Get fresh telemetry
 
-    # MODIFIED: Capture even if not perfectly stable
-    if stable_count >= 1:  # At least ONE stable reading
-        logger.info(f"✓ Proceeding with capture (stability: {stable_count}/{config.STABILITY_CHECKS_NEEDED})")
-    else:
-        logger.warning(f"⚠ Could not achieve stable hover after {elapsed:.1f}s")
-        logger.warning(f"  Current speed: {pixhawk.groundspeed:.2f} m/s")
-        logger.warning(f"  Altitude variation: {pixhawk.get_altitude_variation():.2f} m")
-        logger.warning("  Skipping capture this attempt.")
-        return False
+    # Log current conditions (for reference only, not blocking)
+    logger.info(f"  Current speed: {pixhawk.groundspeed:.2f} m/s")
+    logger.info(f"  Altitude variation: {pixhawk.get_altitude_variation():.2f} m")
+    logger.info(f"✓ Proceeding with capture immediately!")
 
-    # Burst capture with stability monitoring
+    # Burst capture
     num_captures = config.BURST_CAPTURE_COUNT
     burst_interval = config.BURST_INTERVAL
     captured_images = []
@@ -116,13 +91,9 @@ def handle_waypoint_capture(pixhawk, camera, metrics, waypoint, flight_number, c
     logger.info(f"📸 Starting burst capture ({num_captures} frames)...")
 
     for i in range(num_captures):
-        # Quick stability check between frames
         if i > 0:
-            pixhawk.update()
-            
-            if not pixhawk.is_hovering(threshold=config.HOVER_SPEED_THRESHOLD * 1.5):
-                logger.warning(f"⚠ Movement detected at frame {i+1} (speed: {pixhawk.groundspeed:.2f} m/s)")
-                time.sleep(config.BURST_STABILIZATION_DELAY)
+            time.sleep(burst_interval)  # Wait between captures
+            pixhawk.update()  # Update telemetry
         
         try:
             image_path = camera.capture(
@@ -132,7 +103,6 @@ def handle_waypoint_capture(pixhawk, camera, metrics, waypoint, flight_number, c
                 burst_index=i
             )
             
-            # Verify file
             if Path(image_path).exists() and Path(image_path).stat().st_size > 1000:
                 captured_images.append(image_path)
                 
@@ -152,9 +122,6 @@ def handle_waypoint_capture(pixhawk, camera, metrics, waypoint, flight_number, c
                            f"size: {Path(image_path).stat().st_size / 1024:.1f} KB)")
             else:
                 logger.error(f"⚠ Frame {i+1} file invalid or too small")
-            
-            if i < num_captures - 1:
-                time.sleep(burst_interval)
                 
         except Exception as e:
             logger.error(f"⚠ Burst frame {i+1} failed: {e}")
@@ -162,12 +129,11 @@ def handle_waypoint_capture(pixhawk, camera, metrics, waypoint, flight_number, c
     if captured_images:
         logger.info(f"✓ CAPTURED {len(captured_images)}/{num_captures} images at {wp_name}")
         logger.info(f"  Burst ID: {burst_id}")
-        captured_wp.add(waypoint)
         return True
     else:
         logger.error("⚠ Burst capture completely failed - no valid images")
         return False
-
+    
 def get_telemetry_dict(pixhawk):
     """Build telemetry dictionary for metrics"""
     if not pixhawk.position:
