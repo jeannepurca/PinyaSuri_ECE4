@@ -72,9 +72,9 @@ def handle_waypoint_capture(pixhawk, camera, metrics, waypoint, flight_number, c
     # Wait until drone stabilizes
     stable_count = 0
     elapsed = 0.0
-    max_wait_time = 6.0
-    check_interval = 0.4
-    stable_checks_needed = 2
+    max_wait_time = config.STABILITY_WAIT_TIME
+    check_interval = config.STABILITY_CHECK_INTERVAL
+    stable_checks_needed = config.STABILITY_CHECKS_NEEDED
     
     # Relaxed thresholds for outdoor conditions
     speed_threshold = 0.6  # m/s (forgiving for wind)
@@ -250,17 +250,7 @@ def should_capture_image(pixhawk, waypoint, captured_wp, logger):
     if not config.is_mapping_waypoint(waypoint):
         logger.debug(f"⚠ {config.get_waypoint_name(waypoint)} is not a mapping waypoint")
         return False
-    
-    # 7. RELAXED hover detection for outdoor conditions
-    if not pixhawk.is_hovering(threshold=0.6):
-        logger.debug(f"⚠ Still moving at {pixhawk.groundspeed:.2f} m/s")
-        return False
-    
-    # 8. RELAXED altitude stability check
-    if not pixhawk.is_altitude_stable(threshold=0.8, window_size=5):
-        logger.debug(f"⚠ Altitude not stable: {pixhawk.get_altitude_variation():.2f} m variation")
-        return False
-    
+
     # 9. Must reached the verified waypoint
     if waypoint not in pixhawk.wp_reached_log:
         logger.debug(f"⚠ {config.get_waypoint_name(waypoint)} not confirmed reached yet")

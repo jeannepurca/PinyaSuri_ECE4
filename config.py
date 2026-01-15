@@ -42,9 +42,9 @@ FLIGHT_LOG_FILE = get_flight_log_file()
 # Stability thresholds
 HOVER_SPEED_THRESHOLD = 0.6  # m/s
 ALTITUDE_STABILITY_THRESHOLD = 0.8  # m
-STABILITY_WAIT_TIME = 6.0  # seconds
-STABILITY_CHECK_INTERVAL = 0.4  # seconds
-STABILITY_CHECKS_NEEDED = 2
+STABILITY_WAIT_TIME = 2.0  # seconds
+STABILITY_CHECK_INTERVAL = 0.3  # seconds
+STABILITY_CHECKS_NEEDED = 1
 
 # ============================================================================  
 # IMAGE CAPTURE DIRECTORY (daily subfolders)  
@@ -107,7 +107,7 @@ METRICS_WINDOW_SIZE = 10
 # BURST CAPTURE CONFIGURATION  
 # ============================================================================  
 BURST_CAPTURE_COUNT = 5  # Number of images per waypoint
-BURST_INTERVAL = 0.3  # Seconds between captures
+BURST_INTERVAL = 0.15  # Seconds between captures
 BURST_STABILIZATION_DELAY = 0.2  # Extra delay if instability detected during burst
 
 
