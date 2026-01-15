@@ -141,10 +141,10 @@ class FlightMetricsLogger:
         flight_mode = data.get("flight_mode", "UNKNOWN")
         nav_state = data.get("nav_state", "UNKNOWN")
 
-        # Battery
-        battery_voltage = data.get("battery", {}).get("voltage", 0.0)
-        battery_current = data.get("battery", {}).get("current", 0.0)
-        battery_percent = data.get("battery", {}).get("percentage", 0.0)
+        # Battery - handle None values properly
+        battery_voltage = data.get("battery", {}).get("voltage", 0.0) or 0.0
+        battery_current = data.get("battery", {}).get("current", 0.0) or 0.0
+        battery_percent = data.get("battery", {}).get("percentage") or 0.0
 
         # Write telemetry row
         with open(self.csv_file, "a", newline="") as f:
