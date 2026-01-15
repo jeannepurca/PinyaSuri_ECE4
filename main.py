@@ -310,7 +310,7 @@ def main_loop(pixhawk, camera, metrics, logger):
                 "waypoint_alt": pixhawk.get_waypoint_alt(pixhawk.last_wp),
                 "flight_mode": pixhawk.mode,
                 "nav_state": pixhawk.nav_state,
-                "is_hovering": pixhawk.is_hovering(threshold=0.6),
+                "is_hovering": pixhawk.is_hovering(threshold=config.HOVER_SPEED_THRESHOLD),
                 "battery": {
                     "voltage": pixhawk.battery_voltage,
                     "current": pixhawk.battery_current,
