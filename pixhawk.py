@@ -314,37 +314,22 @@ class Pixhawk:
         return self.groundspeed < threshold
     
     def is_altitude_stable(self, threshold=0.5, window_size=7):
-        """
-        Check if altitude is stable (not changing rapidly).
-        
-        Args:
-            threshold: Maximum acceptable altitude variation in meters
-            window_size: Number of recent samples to check
-        
-        Returns:
-            True if altitude variation is within threshold
-        """
+        """Check if altitude is stable (not changing rapidly)"""
         if len(self.altitude_history) < window_size:
             return False
-        
-        # Get recent altitude samples
         recent_altitudes = list(self.altitude_history)[-window_size:]
-        
-        # Calculate variation (max - min)
         variation = max(recent_altitudes) - min(recent_altitudes)
-        
         return variation <= threshold
     
     def get_altitude_variation(self):
         """Get current altitude variation for debugging"""
         if len(self.altitude_history) < 2:
             return 0.0
-        
         recent_altitudes = list(self.altitude_history)
         return max(recent_altitudes) - min(recent_altitudes)
     
     def clear_waypoint_log(self):
-        """Clear the waypoint log (call when disarmed/new flight)"""
+        """Clear the waypoint log"""
         self.wp_reached_log.clear()
         self.altitude_history.clear()
         logger.debug("✓ Cleared waypoint & altitude history.")

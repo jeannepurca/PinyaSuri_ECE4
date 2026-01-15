@@ -56,6 +56,6 @@ class Camera:
     def close(self):
         try:
             self.picam2.stop()
-            logger.info("✓ Camera stopped successfully.")
+            logger.info("✓ Camera closed.")
         except Exception as e:
             logger.warning(f"⚠ Error stopping camera: {e} ⚠")

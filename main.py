@@ -6,7 +6,9 @@ import csv
 import logging
 import sys
 from pathlib import Path
+
 import config
+
 from logging_config import setup_logging
 from pixhawk import Pixhawk
 from camera import Camera
@@ -68,36 +70,29 @@ def handle_waypoint_capture(pixhawk, camera, metrics, waypoint, flight_number, c
     logger.info("=" * 60)
     logger.info(f">>> {wp_name} (WP{waypoint}) REACHED - Capturing burst images...")
     logger.info("=" * 60)
-    
+
     # Wait until drone stabilizes
     stable_count = 0
     elapsed = 0.0
-    max_wait_time = config.STABILITY_WAIT_TIME
-    check_interval = config.STABILITY_CHECK_INTERVAL
-    stable_checks_needed = config.STABILITY_CHECKS_NEEDED
-    
-    # Relaxed thresholds for outdoor conditions
-    speed_threshold = 0.6  # m/s (forgiving for wind)
-    altitude_threshold = 0.8  # m (forgiving for air turbulence)
     
     logger.info(">>> Waiting for drone to stabilize...")
     
-    while elapsed < max_wait_time:
-        time.sleep(check_interval)
-        elapsed += check_interval
+    while elapsed < config.STABILITY_WAIT_TIME:
+        time.sleep(config.STABILITY_CHECK_INTERVAL)
+        elapsed += config.STABILITY_CHECK_INTERVAL
         pixhawk.update()
 
         # Check if drone is stable
-        is_hovering = pixhawk.is_hovering(threshold=speed_threshold)
-        is_alt_stable = pixhawk.is_altitude_stable(threshold=altitude_threshold, window_size=5)
+        is_hovering = pixhawk.is_hovering(threshold=config.HOVER_SPEED_THRESHOLD)
+        is_alt_stable = pixhawk.is_altitude_stable(threshold=config.ALTITUDE_STABILITY_THRESHOLD, window_size=5)
 
         if is_hovering and is_alt_stable:
             stable_count += 1
-            logger.info(f"  ✓ Stable check {stable_count}/{stable_checks_needed} "
+            logger.info(f"  ✓ Stable check {stable_count}/{config.STABILITY_CHECKS_NEEDED} "
                        f"(speed: {pixhawk.groundspeed:.2f} m/s, "
                        f"alt var: {pixhawk.get_altitude_variation():.2f} m)")
             
-            if stable_count >= stable_checks_needed:
+            if stable_count >= config.STABILITY_CHECKS_NEEDED:
                 logger.info(f"✓ Drone stabilized after {elapsed:.1f}s - Capturing now!")
                 break
         else:
@@ -108,11 +103,11 @@ def handle_waypoint_capture(pixhawk, camera, metrics, waypoint, flight_number, c
             stable_count = 0
 
     # Check if we achieved stability
-    if stable_count < stable_checks_needed:
+    if stable_count < config.STABILITY_CHECKS_NEEDED:
         logger.warning(f"⚠ Could not achieve stable hover after {elapsed:.1f}s")
         logger.warning(f"  Current speed: {pixhawk.groundspeed:.2f} m/s")
         logger.warning(f"  Altitude variation: {pixhawk.get_altitude_variation():.2f} m")
-        logger.warning(f"  Mission Planner will hold for {10 - elapsed:.1f}s more")
+        logger.warning(f"  Mission Planner will hold for {config.STABILITY_WAIT_TIME - elapsed:.1f}s more")
         logger.warning("  Skipping capture this attempt.")
         return False
 
@@ -248,7 +243,6 @@ def should_capture_image(pixhawk, waypoint, captured_wp, logger):
     
     # 6. Must capture only at survey/mapping waypoints
     if not config.is_mapping_waypoint(waypoint):
-        logger.debug(f"⚠ {config.get_waypoint_name(waypoint)} is not a mapping waypoint")
         return False
     
     # All checks passed!
@@ -317,9 +311,7 @@ def main_loop(pixhawk, camera, metrics, logger):
                 pixhawk, camera, metrics, 
                 pixhawk.last_wp, flight_number, captured_wp, logger
             )
-        
         time.sleep(config.MAIN_LOOP_INTERVAL)
-    
     return was_armed
 
 def cleanup(camera, pixhawk, metrics, was_armed, logger):
@@ -372,7 +364,6 @@ def main():
         logger.info("=" * 60)
         logger.info("⚠ MANUAL STOP - Interrupted by user! ⚠")
         logger.info("=" * 60)
-
         time.sleep(0.5)
         was_armed = pixhawk.armed if pixhawk else False
     except Exception as e:
