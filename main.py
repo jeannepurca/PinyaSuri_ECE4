@@ -77,7 +77,11 @@ def handle_waypoint_capture(pixhawk, camera, metrics, waypoint, flight_number, c
     stable_count = 0
     max_attempts = 3  # Quick checks before giving up
     
-    for attempt in range(max_attempts):
+    logger.info(">>> Waiting for drone to stabilize...")
+
+    while elapsed < config.STABILITY_WAIT_TIME:
+        time.sleep(config.STABILITY_CHECK_INTERVAL)
+        elapsed += config.STABILITY_CHECK_INTERVAL
         pixhawk.update()
         
         is_hovering = pixhawk.is_hovering(threshold=config.HOVER_SPEED_THRESHOLD)
@@ -90,19 +94,20 @@ def handle_waypoint_capture(pixhawk, camera, metrics, waypoint, flight_number, c
                        f"alt var: {pixhawk.get_altitude_variation():.2f} m)")
             break  # Good enough, capture now!
         else:
-            logger.info(f"  ○ Quick check {attempt+1}/{max_attempts} "
-                       f"(speed: {pixhawk.groundspeed:.2f} m/s, "
-                       f"alt var: {pixhawk.get_altitude_variation():.2f} m)")
-            time.sleep(0.3)  # Brief pause
+            # DON'T reset counter - allow gradual stabilization
+            logger.info(f"  ○ Stabilizing... (speed: {pixhawk.groundspeed:.2f} m/s, alt var: {pixhawk.get_altitude_variation():.2f}m)")
 
-    # If we got at least one stable reading, proceed
-    if stable_count >= 1:
-        logger.info(f"✓ Proceeding with capture immediately!")
+    # MODIFIED: Capture even if not perfectly stable
+    if stable_count >= 1:  # At least ONE stable reading
+        logger.info(f"✓ Proceeding with capture (stability: {stable_count}/{config.STABILITY_CHECKS_NEEDED})")
     else:
-        logger.warning(f"⚠ No stable readings in quick checks, capturing anyway (best effort)")
-        # Still capture - we're at the waypoint NOW
+        logger.warning(f"⚠ Could not achieve stable hover after {elapsed:.1f}s")
+        logger.warning(f"  Current speed: {pixhawk.groundspeed:.2f} m/s")
+        logger.warning(f"  Altitude variation: {pixhawk.get_altitude_variation():.2f} m")
+        logger.warning("  Skipping capture this attempt.")
+        return False
 
-    # Burst capture
+    # Burst capture with stability monitoring
     num_captures = config.BURST_CAPTURE_COUNT
     burst_interval = config.BURST_INTERVAL
     captured_images = []
