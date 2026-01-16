@@ -222,7 +222,7 @@ def is_drone_in_air(pixhawk):
     
     return pixhawk.position["rel_alt"] >= config.MIN_ALTITUDE_FOR_CAPTURE
 
-def should_capture_image(pixhawk, waypoint, captured_wp, logger, last_check_state=None):
+def should_capture_image(pixhawk, waypoint, captured_wp, logger):
     """Check if conditions are met for image capture"""
 
     # 1. Must be armed
@@ -251,6 +251,16 @@ def should_capture_image(pixhawk, waypoint, captured_wp, logger, last_check_stat
         logger.debug(f"⚠ {config.get_waypoint_name(waypoint)} is not a mapping waypoint")
         return False
 
+    # 7. RELAXED hover detection for outdoor conditions
+    if not pixhawk.is_hovering(threshold=0.6):
+        logger.debug(f"⚠ Still moving at {pixhawk.groundspeed:.2f} m/s")
+        return False
+    
+    # 8. RELAXED altitude stability check
+    if not pixhawk.is_altitude_stable(threshold=0.8, window_size=5):
+        logger.debug(f"⚠ Altitude not stable: {pixhawk.get_altitude_variation():.2f} m variation")
+        return False
+
     # 9. Must reached the verified waypoint
     if waypoint not in pixhawk.wp_reached_log:
         logger.debug(f"⚠ {config.get_waypoint_name(waypoint)} not confirmed reached yet")
@@ -265,7 +275,6 @@ def main_loop(pixhawk, camera, metrics, logger):
     flight_number = metrics.flight_number
     was_armed = False
     current_mode = "UNKNOWN"
-    last_check_state = {}
     
     logger.info("=" * 60)
     logger.info("🍍 PINYASURI FLIGHT SYSTEM READY! 🚁")
@@ -302,9 +311,6 @@ def main_loop(pixhawk, camera, metrics, logger):
                     "groundspeed": pixhawk.groundspeed
                 },
                 "waypoint_index": pixhawk.last_wp,
-                "waypoint_lat": pixhawk.get_waypoint_lat(pixhawk.last_wp),
-                "waypoint_lon": pixhawk.get_waypoint_lon(pixhawk.last_wp),
-                "waypoint_alt": pixhawk.get_waypoint_alt(pixhawk.last_wp),
                 "flight_mode": pixhawk.mode,
                 "nav_state": pixhawk.nav_state,
                 "is_hovering": pixhawk.is_hovering(threshold=0.6),
@@ -318,7 +324,7 @@ def main_loop(pixhawk, camera, metrics, logger):
 
         
         # Check for image capture
-        if should_capture_image(pixhawk, pixhawk.last_wp, captured_wp, logger, last_check_state):
+        if should_capture_image(pixhawk, pixhawk.last_wp, captured_wp, logger):
             handle_waypoint_capture(
                 pixhawk, camera, metrics, 
                 pixhawk.last_wp, flight_number, captured_wp, logger
