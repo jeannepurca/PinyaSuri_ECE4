@@ -102,11 +102,6 @@ class Pixhawk:
     # TELEMETRY UPDATE LOOP
     # ---------------------------------------------------------    
     def update(self):
-        """
-        Drain MAVLink queue completely.
-        This MUST be non-blocking and process ALL messages.
-        """
-        
         while True:
             msg = self.master.recv_match(blocking=False)
             if not msg:
