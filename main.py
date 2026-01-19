@@ -164,10 +164,16 @@ def handle_arm_state_change(pixhawk, metrics, was_armed, flight_number, captured
     return was_armed, flight_number
 
 def is_drone_in_air(pixhawk):
+    """Check if drone altitude is within capture range"""
     if not pixhawk.position:
         return False
     
-    return pixhawk.position["rel_alt"] >= config.MIN_ALTITUDE_FOR_CAPTURE
+    alt = pixhawk.position["rel_alt"]
+    
+    # Check if altitude is within the acceptable range
+    in_range = config.MIN_ALTITUDE_FOR_CAPTURE <= alt <= config.MAX_ALTITUDE_FOR_CAPTURE
+    
+    return in_range
 
 def should_capture_image(pixhawk, waypoint, captured_wp, logger):
     """DEBUGGING VERSION - logs every check"""
@@ -189,7 +195,9 @@ def should_capture_image(pixhawk, waypoint, captured_wp, logger):
     
     # 4. Must be in the air
     if not is_drone_in_air(pixhawk):
-        logger.debug(f"❌ Check failed: Altitude {pixhawk.position['rel_alt']:.2f}m < {config.MIN_ALTITUDE_FOR_CAPTURE}m")
+        alt = pixhawk.position['rel_alt'] if pixhawk.position else 0
+        logger.debug(f"❌ Check failed: Altitude {alt:.2f}m not in range "
+                    f"[{config.MIN_ALTITUDE_FOR_CAPTURE}m - {config.MAX_ALTITUDE_FOR_CAPTURE}m]")
         return False
     
     # 5. Must NOT have already captured this waypoint

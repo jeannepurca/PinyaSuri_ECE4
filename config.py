@@ -97,7 +97,8 @@ def get_waypoint_type(wp_number):
 # ============================================================================  
 # FLIGHT CAPTURE CONFIGURATION  
 # ============================================================================  
-MIN_ALTITUDE_FOR_CAPTURE = 2.0
+MIN_ALTITUDE_FOR_CAPTURE = 1.5  # meters - minimum altitude (safety floor)
+MAX_ALTITUDE_FOR_CAPTURE = 3.0 # meters - maximum altitude (upper limit)
 MAIN_LOOP_INTERVAL = 0.05  # seconds
 METRICS_LOG_INTERVAL = 0.5  # seconds
 METRICS_WINDOW_SIZE = 10
