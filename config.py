@@ -40,7 +40,7 @@ FLIGHT_LOG_FILE = get_flight_log_file()
 
 
 # Stability thresholds
-HOVER_SPEED_THRESHOLD = 1.0  # m/s
+HOVER_SPEED_THRESHOLD = 0.8 # m/s
 STABILIZATION_DELAY = 1.5  # seconds
 
 # ALTITUDE_STABILITY_THRESHOLD = 1.0  # m
