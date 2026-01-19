@@ -215,6 +215,12 @@ def should_capture_image(pixhawk, waypoint, captured_wp, logger):
         logger.debug(f"❌ Check failed: No distance data available yet")
         return False
     
+    # ✨ NEW: 8. Must be hovering (nearly stopped)
+    if pixhawk.groundspeed > config.HOVER_SPEED_THRESHOLD:
+        logger.debug(f"❌ Check failed: Still moving at {pixhawk.groundspeed:.2f} m/s "
+                    f"(threshold: {config.HOVER_SPEED_THRESHOLD} m/s)")
+        return False
+    
     if pixhawk.wp_dist > config.WAYPOINT_CAPTURE_DISTANCE:
         logger.debug(f"❌ Check failed: Too far from WP{waypoint} "
                     f"({pixhawk.wp_dist:.2f}m > {config.WAYPOINT_CAPTURE_DISTANCE}m)")
@@ -225,6 +231,7 @@ def should_capture_image(pixhawk, waypoint, captured_wp, logger):
     logger.info(f"   Armed: {pixhawk.armed}")
     logger.info(f"   Altitude: {pixhawk.position['rel_alt']:.2f}m")
     logger.info(f"   Distance to waypoint: {pixhawk.wp_dist:.2f}m")
+    logger.info(f"   Groundspeed: {pixhawk.groundspeed:.2f} m/s")
     return True
 
 
@@ -299,7 +306,7 @@ def main_loop(pixhawk, camera, metrics, logger):
                 pixhawk.last_wp, flight_number, captured_wp, logger
             )
         
-        time.sleep(0.05)  # Fast loop
+        time.sleep(config.MAIN_LOOP_INTERVAL)   # Fast loop
     
     return was_armed
 
