@@ -1,5 +1,3 @@
-print(">>> main.py EXECUTED <<<")
-
 #!/usr/bin/env python3
 # main.py - DEBUGGING VERSION
 
