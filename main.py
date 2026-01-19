@@ -69,8 +69,10 @@ def handle_waypoint_capture(pixhawk, camera, metrics, waypoint, flight_number, c
     logger.info(f">>> {wp_name} (WP{waypoint}) REACHED - Capturing burst images...")
     logger.info("=" * 60)
     
-    # Minimal delay - just capture immediately
-    time.sleep(0.5)  # Brief pause to let drone settle
+    # ✨ NEW: Wait for drone to fully stabilize
+    logger.info(f"⏳ Waiting {config.STABILIZATION_DELAY}s for drone to settle...")
+    time.sleep(config.STABILIZATION_DELAY)
+
     pixhawk.update()  # Get latest data
     
     # Burst capture
