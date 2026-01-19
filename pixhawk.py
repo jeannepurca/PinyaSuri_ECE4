@@ -199,9 +199,9 @@ class Pixhawk:
                 if msg.battery_remaining != -1:
                     self.battery_remaining = msg.battery_remaining
                 
-                logger.debug(f"Battery: {self.battery_remaining}%, "
-                            f"{self.battery_voltage:.2f}V, "
-                            f"{self.battery_current:.2f}A")
+                # logger.debug(f"Battery: {self.battery_remaining}%, "
+                #            f"{self.battery_voltage:.2f}V, "
+                #            f"{self.battery_current:.2f}A")
 
     # ---------------------------------------------------------
     # Attitude Getters (for gimbal)
