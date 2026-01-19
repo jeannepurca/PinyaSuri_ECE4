@@ -7,7 +7,7 @@ import logging
 import sys
 from pathlib import Path
 import config
-from logging_config import setup_logging
+# from logging_config import setup_logging
 from pixhawk import Pixhawk
 from camera import Camera
 from metrics import get_next_daily_flight_number
@@ -327,10 +327,11 @@ def cleanup(camera, pixhawk, metrics, was_armed, logger):
 def main():
     global running
     
-    logger = setup_logging()
+    logger = logging.getLogger(__name__)
+
     
     # SET DEBUG LEVEL
-    logger.setLevel(logging.INFO)
+    logger.setLevel(logging.DEBUG)
     
     pixhawk = Pixhawk()
     camera = Camera()
