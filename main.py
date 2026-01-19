@@ -328,10 +328,7 @@ def main():
     global running
     
     logger = setup_logging()
-    
-    # SET DEBUG LEVEL
-    logger.setLevel(logging.DEBUG)
-    
+        
     pixhawk = Pixhawk()
     camera = Camera()
     next_flight_number = get_next_daily_flight_number()
