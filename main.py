@@ -330,7 +330,7 @@ def main():
     logger = setup_logging()
     
     # SET DEBUG LEVEL
-    logger.setLevel(logging.DEB)
+    logger.setLevel(logging.DEBUG)
     
     pixhawk = Pixhawk()
     camera = Camera()
