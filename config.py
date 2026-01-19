@@ -40,10 +40,10 @@ FLIGHT_LOG_FILE = get_flight_log_file()
 
 
 # Stability thresholds
-HOVER_SPEED_THRESHOLD = 0.6  # m/s
-ALTITUDE_STABILITY_THRESHOLD = 0.8  # m
-STABILITY_WAIT_TIME = 2.0  # seconds
-STABILITY_CHECK_INTERVAL = 0.3  # seconds
+HOVER_SPEED_THRESHOLD = 1.0  # m/s
+ALTITUDE_STABILITY_THRESHOLD = 1.0  # m
+STABILITY_WAIT_TIME = 1.5  # seconds
+STABILITY_CHECK_INTERVAL = 0.2  # seconds
 STABILITY_CHECKS_NEEDED = 1
 
 # ============================================================================  
@@ -98,7 +98,7 @@ def get_waypoint_type(wp_number):
 # FLIGHT CAPTURE CONFIGURATION  
 # ============================================================================  
 MIN_ALTITUDE_FOR_CAPTURE = 2.0
-MAIN_LOOP_INTERVAL = 0.1  # seconds
+MAIN_LOOP_INTERVAL = 0.05  # seconds
 METRICS_LOG_INTERVAL = 0.5  # seconds
 METRICS_WINDOW_SIZE = 10
 
