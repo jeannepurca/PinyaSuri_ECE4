@@ -6,7 +6,7 @@ import config
 
 def setup_logging():
     logging.basicConfig(
-        level=logging.DEBUG,
+        level=logging.INFO,
         format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
         handlers=[
             logging.FileHandler(config.FLIGHT_LOG_FILE),
