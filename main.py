@@ -176,7 +176,7 @@ def is_drone_in_air(pixhawk):
     return in_range
 
 def should_capture_image(pixhawk, waypoint, captured_wp, logger):
-    """DEBUGGING VERSION - logs every check"""
+    """PROXIMITY-BASED VERSION - uses wp_dist instead of reached log"""
 
     # 1. Must be armed
     if not pixhawk.armed:
@@ -210,19 +210,23 @@ def should_capture_image(pixhawk, waypoint, captured_wp, logger):
         logger.debug(f"❌ Check failed: WP{waypoint} is not a mapping waypoint")
         return False
 
-    # 7. Must have reached the waypoint (confirmed by MISSION_ITEM_REACHED)
-    if waypoint not in pixhawk.wp_reached_log:
-        logger.debug(f"❌ Check failed: WP{waypoint} not in reached log yet")
-        logger.debug(f"   Reached log contents: {pixhawk.wp_reached_log}")
-        logger.debug(f"   Current waypoint: {pixhawk.last_wp}")
+    # ✨ NEW: 7. Must be close to waypoint (using distance, not reached log)
+    if pixhawk.wp_dist is None:
+        logger.debug(f"❌ Check failed: No distance data available yet")
+        return False
+    
+    if pixhawk.wp_dist > config.WAYPOINT_CAPTURE_DISTANCE:
+        logger.debug(f"❌ Check failed: Too far from WP{waypoint} "
+                    f"({pixhawk.wp_dist:.2f}m > {config.WAYPOINT_CAPTURE_DISTANCE}m)")
         return False
 
     # All checks passed!
     logger.info(f"✅ ALL CHECKS PASSED - Triggering capture for WP{waypoint}!")
     logger.info(f"   Armed: {pixhawk.armed}")
     logger.info(f"   Altitude: {pixhawk.position['rel_alt']:.2f}m")
-    logger.info(f"   Waypoint in log: {waypoint in pixhawk.wp_reached_log}")
+    logger.info(f"   Distance to waypoint: {pixhawk.wp_dist:.2f}m")
     return True
+
 
 def main_loop(pixhawk, camera, metrics, logger):
     captured_wp = set()
@@ -253,9 +257,11 @@ def main_loop(pixhawk, camera, metrics, logger):
         # PERIODIC DEBUG OUTPUT (every 2 seconds when armed)
         if pixhawk.armed and (time.time() - last_debug_time) > 2.0:
             last_debug_time = time.time()
+            # ✨ UPDATED: Show distance instead of reached log
+            dist_str = f"{pixhawk.wp_dist:.2f}m" if pixhawk.wp_dist else "N/A"
             logger.debug(f"[STATUS] Mode: {pixhawk.mode}, WP: {pixhawk.last_wp}, "
                         f"Alt: {pixhawk.position['rel_alt']:.1f}m, "
-                        f"WP Log: {pixhawk.wp_reached_log}, "
+                        f"Dist to WP: {dist_str}, "
                         f"Captured: {captured_wp}")
 
         # Update metrics during flight

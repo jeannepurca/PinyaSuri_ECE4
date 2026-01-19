@@ -36,6 +36,9 @@ class Pixhawk:
 
         # Waypoint Tracking
         self.wp_reached_log = set()
+        
+        # ✨ NEW: Distance to current waypoint
+        self.wp_dist = None  # Distance to current waypoint in meters
 
         # Altitude Stability Tracking
         self.altitude_history = deque(maxlen=10)
@@ -84,6 +87,9 @@ class Pixhawk:
         # Mission/Waypoints
         self._request_message(mavutil.mavlink.MAVLINK_MSG_ID_MISSION_CURRENT, 10)
         self._request_message(mavutil.mavlink.MAVLINK_MSG_ID_MISSION_ITEM_REACHED, 10)
+        
+        # ✨ NEW: Request navigation controller output for wp_dist
+        self._request_message(mavutil.mavlink.MAVLINK_MSG_ID_NAV_CONTROLLER_OUTPUT, 10)
 
         # Position & Altitude
         self._request_message(mavutil.mavlink.MAVLINK_MSG_ID_GLOBAL_POSITION_INT, 10)
@@ -97,6 +103,7 @@ class Pixhawk:
 
         # IMU Data
         self._request_message(mavutil.mavlink.MAVLINK_MSG_ID_RAW_IMU, 5)
+
 
     # ---------------------------------------------------------
     # TELEMETRY UPDATE LOOP
@@ -138,6 +145,11 @@ class Pixhawk:
                 self.pitch = math.degrees(msg.pitch)
                 self.yaw = math.degrees(msg.yaw)
 
+            # ✨ NEW: Navigation Controller Output (contains wp_dist)
+            if msg_type == "NAV_CONTROLLER_OUTPUT":
+                self.wp_dist = msg.wp_dist  # Distance to waypoint in meters
+                logger.debug(f"Distance to WP{self.last_wp}: {self.wp_dist:.2f}m")
+
             # -------------------------------
             # WAYPOINT (Current)
             # -------------------------------
@@ -159,7 +171,7 @@ class Pixhawk:
                         if wp_num not in self.wp_reached_log:
                             self.wp_reached_log.add(wp_num)
                             wp_name = config.get_waypoint_name(wp_num)
-                            logger.info(f"✓ {wp_name} (WP{wp_num}) REACHED, CONFIRMED!")
+                            logger.info(f"✓ {wp_name} (WP{wp_num}) REACHED (official event)")
 
             # -------------------------------
             # HEARTBEAT (MODE + ARM)
