@@ -217,13 +217,6 @@ def should_capture_image(pixhawk, waypoint, captured_wp, logger):
         logger.debug(f"   Current waypoint: {pixhawk.last_wp}")
         return False
 
-    # 8. TAKEOFF must be completed first (NEW CHECK!)
-    if config.WP_TAKEOFF not in pixhawk.wp_reached_log:
-        logger.debug(f"❌ Check failed: TAKEOFF (WP{config.WP_TAKEOFF}) not completed yet")
-        logger.debug(f"   Current waypoint: WP{waypoint}")
-        logger.debug(f"   Reached log: {pixhawk.wp_reached_log}")
-        return False
-
     # All checks passed!
     logger.info(f"✅ ALL CHECKS PASSED - Triggering capture for WP{waypoint}!")
     logger.info(f"   Armed: {pixhawk.armed}")
