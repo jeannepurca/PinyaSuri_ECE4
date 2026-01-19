@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# main.py - IMPROVED VERSION
+# main.py - DEBUGGING VERSION
 
 import time
 import csv
@@ -57,10 +57,10 @@ def log_image_capture(flight_id, flight_number, waypoint, position, burst_id, bu
         logger.error(f"Failed to log image capture to CSV: {e}")
 
 # ----------------------------
-# Capture handler - IMPROVED
+# Capture handler
 # ----------------------------
 def handle_waypoint_capture(pixhawk, camera, metrics, waypoint, flight_number, captured_wp, logger):
-    """Capture burst images at waypoint - FASTER VERSION"""
+    """Capture burst images at waypoint - FAST VERSION"""
     if waypoint in captured_wp:
         return False
         
@@ -69,45 +69,11 @@ def handle_waypoint_capture(pixhawk, camera, metrics, waypoint, flight_number, c
     logger.info(f">>> {wp_name} (WP{waypoint}) REACHED - Capturing burst images...")
     logger.info("=" * 60)
     
-    # SIMPLIFIED STABILITY CHECK - Just verify we're at the waypoint
-    stable_count = 0
-    elapsed = 0.0
-    max_wait_time = config.STABILITY_WAIT_TIME  # REDUCED from 2.0 seconds
-    check_interval = config.STABILITY_CHECK_INTERVAL  # REDUCED from 0.3 seconds
-    stable_checks_needed = config.STABILITY_CHECKS_NEEDED  # REDUCED from multiple checks
+    # Minimal delay - just capture immediately
+    time.sleep(0.5)  # Brief pause to let drone settle
+    pixhawk.update()  # Get latest data
     
-    # MORE RELAXED thresholds
-    speed_threshold = config.HOVER_SPEED_THRESHOLD  # m/s (was 0.6) - allow more movement
-    
-    logger.info(">>> Quick stability check...")
-    
-    while elapsed < max_wait_time:
-        time.sleep(check_interval)
-        elapsed += check_interval
-        pixhawk.update()
-
-        # Only check speed, not altitude stability
-        is_hovering = pixhawk.is_hovering(threshold=speed_threshold)
-
-        if is_hovering:
-            stable_count += 1
-            logger.info(f"  ✓ Stable check {stable_count}/{stable_checks_needed} "
-                       f"(speed: {pixhawk.groundspeed:.2f} m/s)")
-            
-            if stable_count >= stable_checks_needed:
-                logger.info(f"✓ Ready to capture after {elapsed:.1f}s!")
-                break
-        else:
-            if stable_count > 0:
-                logger.debug(f"  ○ Rechecking... (speed: {pixhawk.groundspeed:.2f} m/s)")
-            stable_count = 0
-
-    # Don't skip capture even if not perfectly stable
-    # Just warn and continue
-    if stable_count < stable_checks_needed:
-        logger.warning(f"⚠ Not perfectly stable, but capturing anyway (speed: {pixhawk.groundspeed:.2f} m/s)")
-
-    # Burst capture - SIMPLIFIED
+    # Burst capture
     num_captures = config.BURST_CAPTURE_COUNT
     burst_interval = config.BURST_INTERVAL
     captured_images = []
@@ -116,7 +82,6 @@ def handle_waypoint_capture(pixhawk, camera, metrics, waypoint, flight_number, c
     logger.info(f"📸 Starting burst capture ({num_captures} frames)...")
 
     for i in range(num_captures):
-        # NO stability check between frames - just capture fast
         try:
             image_path = camera.capture(
                 waypoint=waypoint,
@@ -205,41 +170,50 @@ def is_drone_in_air(pixhawk):
     return pixhawk.position["rel_alt"] >= config.MIN_ALTITUDE_FOR_CAPTURE
 
 def should_capture_image(pixhawk, waypoint, captured_wp, logger):
-    """SIMPLIFIED capture conditions - faster detection"""
+    """DEBUGGING VERSION - logs every check"""
 
     # 1. Must be armed
     if not pixhawk.armed:
+        logger.debug("❌ Check failed: Not armed")
         return False
     
     # 2. Must have valid waypoint
     if not waypoint:
+        logger.debug("❌ Check failed: No waypoint")
         return False
     
     # 3. Must have position data from GPS
     if not pixhawk.position:
+        logger.debug("❌ Check failed: No position data")
         return False
     
     # 4. Must be in the air
     if not is_drone_in_air(pixhawk):
+        logger.debug(f"❌ Check failed: Altitude {pixhawk.position['rel_alt']:.2f}m < {config.MIN_ALTITUDE_FOR_CAPTURE}m")
         return False
     
     # 5. Must NOT have already captured this waypoint
     if waypoint in captured_wp:
+        logger.debug(f"❌ Check failed: Already captured WP{waypoint}")
         return False
     
     # 6. Must capture only at survey/mapping waypoints
     if not config.is_mapping_waypoint(waypoint):
+        logger.debug(f"❌ Check failed: WP{waypoint} is not a mapping waypoint")
         return False
 
     # 7. Must have reached the waypoint (confirmed by MISSION_ITEM_REACHED)
     if waypoint not in pixhawk.wp_reached_log:
+        logger.debug(f"❌ Check failed: WP{waypoint} not in reached log yet")
+        logger.debug(f"   Reached log contents: {pixhawk.wp_reached_log}")
+        logger.debug(f"   Current waypoint: {pixhawk.last_wp}")
         return False
     
-    # REMOVED: Hover check - too strict, causes misses
-    # REMOVED: Altitude stability - too strict, causes misses
-    
     # All checks passed!
-    logger.info(f"✓ Waypoint {waypoint} reached - triggering capture!")
+    logger.info(f"✅ ALL CHECKS PASSED - Triggering capture for WP{waypoint}!")
+    logger.info(f"   Armed: {pixhawk.armed}")
+    logger.info(f"   Altitude: {pixhawk.position['rel_alt']:.2f}m")
+    logger.info(f"   Waypoint in log: {waypoint in pixhawk.wp_reached_log}")
     return True
 
 def main_loop(pixhawk, camera, metrics, logger):
@@ -247,6 +221,7 @@ def main_loop(pixhawk, camera, metrics, logger):
     flight_number = metrics.flight_number
     was_armed = False
     current_mode = "UNKNOWN"
+    last_debug_time = 0
     
     logger.info("=" * 60)
     logger.info("🍍 PINYASURI FLIGHT SYSTEM READY! 🚁")
@@ -266,6 +241,14 @@ def main_loop(pixhawk, camera, metrics, logger):
         if pixhawk.mode != current_mode:
             current_mode = pixhawk.mode
             logger.info(f"> Flight Mode: {current_mode}")
+
+        # PERIODIC DEBUG OUTPUT (every 2 seconds when armed)
+        if pixhawk.armed and (time.time() - last_debug_time) > 2.0:
+            last_debug_time = time.time()
+            logger.debug(f"[STATUS] Mode: {pixhawk.mode}, WP: {pixhawk.last_wp}, "
+                        f"Alt: {pixhawk.position['rel_alt']:.1f}m, "
+                        f"WP Log: {pixhawk.wp_reached_log}, "
+                        f"Captured: {captured_wp}")
 
         # Update metrics during flight
         if pixhawk.armed:
@@ -295,14 +278,14 @@ def main_loop(pixhawk, camera, metrics, logger):
             metrics.log_telemetry(telemetry)
 
         
-        # Check for image capture - SIMPLIFIED logic
+        # Check for image capture
         if should_capture_image(pixhawk, pixhawk.last_wp, captured_wp, logger):
             handle_waypoint_capture(
                 pixhawk, camera, metrics, 
                 pixhawk.last_wp, flight_number, captured_wp, logger
             )
         
-        time.sleep(config.MAIN_LOOP_INTERVAL)  # FASTER loop - was 0.1
+        time.sleep(0.05)  # Fast loop
     
     return was_armed
 
@@ -337,6 +320,10 @@ def main():
     global running
     
     logger = setup_logging()
+    
+    # SET DEBUG LEVEL
+    logger.setLevel(logging.DEBUG)
+    
     pixhawk = Pixhawk()
     camera = Camera()
     next_flight_number = get_next_daily_flight_number()
