@@ -14,6 +14,10 @@ class Pixhawk:
     def __init__(self):
         self.master = mavutil.mavlink_connection(config.PIXHAWK_ADDRESS, baud=57600)
 
+        # Mission tracking
+        self.mission_count = None  # Total number of waypoints in mission
+        self.last_wp = None
+
         # Flight State
         self.last_wp = None
         self.position = None
@@ -33,12 +37,9 @@ class Pixhawk:
 
         # Telemetry
         self.last_msg_time = None
-
-        # Waypoint Tracking
-        self.wp_reached_log = set()
         
-        # ✨ NEW: Distance to current waypoint
-        self.wp_dist = None  # Distance to current waypoint in meters
+        # Distance to current waypoint
+        self.wp_dist = None  # meters
 
         # Altitude Stability Tracking
         self.altitude_history = deque(maxlen=10)
@@ -86,9 +87,8 @@ class Pixhawk:
 
         # Mission/Waypoints
         self._request_message(mavutil.mavlink.MAVLINK_MSG_ID_MISSION_CURRENT, 10)
-        self._request_message(mavutil.mavlink.MAVLINK_MSG_ID_MISSION_ITEM_REACHED, 10)
         
-        # ✨ NEW: Request navigation controller output for wp_dist
+        # Request navigation controller output for wp_dist
         self._request_message(mavutil.mavlink.MAVLINK_MSG_ID_NAV_CONTROLLER_OUTPUT, 10)
 
         # Position & Altitude
@@ -103,6 +103,32 @@ class Pixhawk:
 
         # IMU Data
         self._request_message(mavutil.mavlink.MAVLINK_MSG_ID_RAW_IMU, 5)
+
+    # ---------------------------------------------------------
+    # MISSION COUNTING
+    # ---------------------------------------------------------
+    def request_mission_count(self):
+        """Request the total number of waypoints in the current mission"""
+        self.master.mav.mission_request_list_send(
+            self.master.target_system,
+            self.master.target_component
+        )
+        
+        # Wait for response
+        msg = self.master.recv_match(type='MISSION_COUNT', blocking=True, timeout=5)
+        if msg:
+            self.mission_count = msg.count
+            logger.info(f"✓ Mission has {self.mission_count} waypoints (0 to {self.mission_count - 1})")
+            return self.mission_count
+        else:
+            logger.warning("⚠ Failed to get mission count")
+            return None
+
+    def get_last_waypoint(self):
+        """Get the last waypoint number (mission_count - 1)"""
+        if self.mission_count is not None:
+            return self.mission_count - 1
+        return None
 
 
     # ---------------------------------------------------------
@@ -161,19 +187,6 @@ class Pixhawk:
                     if self.last_wp != new_wp:
                         logger.debug(f"> Waypoint changed: {self.last_wp} -> {new_wp}")
                         self.last_wp = new_wp
-
-            # -------------------------------
-            # WAYPOINT REACHED EVENT
-            # -------------------------------
-            elif msg_type == "MISSION_ITEM_REACHED":
-                if self.mode == "AUTO" and 0 <= msg.seq <= 255:
-                    wp_num = msg.seq
-
-                    if self.position and self.position["rel_alt"] >= config.MIN_ALTITUDE_FOR_CAPTURE:
-                        if wp_num not in self.wp_reached_log:
-                            self.wp_reached_log.add(wp_num)
-                            wp_name = config.get_waypoint_name(wp_num)
-                            logger.info(f"✓ {wp_name} (WP{wp_num}) REACHED (official event)")
 
             # -------------------------------
             # HEARTBEAT (MODE + ARM)
@@ -262,7 +275,6 @@ class Pixhawk:
     
     def clear_waypoint_log(self):
         """Clear the waypoint log (call when disarmed/new flight)"""
-        self.wp_reached_log.clear()
         self.altitude_history.clear()
         logger.debug("✓ Cleared waypoint & altitude history.")
 

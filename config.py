@@ -61,8 +61,14 @@ PIXHAWK_ADDRESS = "/dev/ttyAMA0"
 WP_HOME = 0
 WP_TAKEOFF = 1
 
-def is_mapping_waypoint(wp_number):
-    return wp_number not in (WP_HOME, WP_TAKEOFF)
+def is_mapping_waypoint(wp_number, last_wp=None):
+    excluded = [WP_HOME, WP_TAKEOFF]
+    
+    # Exclude last waypoint if provided
+    if last_wp is not None:
+        excluded.append(last_wp)
+    
+    return wp_number not in excluded
 
 def get_waypoint_name(wp_number):
     if wp_number == WP_HOME:
@@ -98,7 +104,7 @@ STABILIZATION_DELAY = 2  # seconds
 # BURST CAPTURE CONFIGURATION  
 # ============================================================================  
 BURST_CAPTURE_COUNT = 5  # Number of images per waypoint
-BURST_INTERVAL = 0.2  # Seconds between captures
+BURST_INTERVAL = 0.5  # Seconds between captures
 
 
 # ============================================================================  

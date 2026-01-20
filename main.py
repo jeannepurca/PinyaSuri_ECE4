@@ -206,12 +206,13 @@ def should_capture_image(pixhawk, waypoint, captured_wp, logger):
         logger.debug(f"❌ Check failed: Already captured WP{waypoint}")
         return False
     
-    # 6. Must capture only at survey/mapping waypoints
-    if not config.is_mapping_waypoint(waypoint):
+    # 6. Must capture only at survey/mapping waypoints (exclude last waypoint)
+    last_wp = pixhawk.get_last_waypoint()
+    if not config.is_mapping_waypoint(waypoint, last_wp):
         logger.debug(f"❌ Check failed: WP{waypoint} is not a mapping waypoint")
         return False
 
-    # 7. Must be close to waypoint
+    # 7. Must have distance data
     if pixhawk.wp_dist is None:
         logger.debug(f"❌ Check failed: No distance data available yet")
         return False
@@ -360,6 +361,7 @@ def main():
     # Wait for connection
     try:
         pixhawk.wait_for_connection()
+        pixhawk.request_mission_count()
         initialize_csv()
         was_armed = main_loop(pixhawk, camera, metrics, logger)
     except KeyboardInterrupt:
