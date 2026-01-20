@@ -229,11 +229,13 @@ def should_capture_image(pixhawk, waypoint, captured_wp, logger):
         return False
 
     # All checks passed!
+    logger.info("=" * 60)
     logger.info(f"✅ ALL CHECKS PASSED - Triggering capture for WP{waypoint}!")
     logger.info(f"   Armed: {pixhawk.armed}")
     logger.info(f"   Altitude: {pixhawk.position['rel_alt']:.2f}m")
     logger.info(f"   Distance to waypoint: {pixhawk.wp_dist:.2f}m")
     logger.info(f"   Groundspeed: {pixhawk.groundspeed:.2f} m/s")
+    logger.info("=" * 60)
     return True
 
 

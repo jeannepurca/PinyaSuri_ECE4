@@ -149,7 +149,7 @@ class Pixhawk:
             # NAVIGATION CONTROLLER OUTPUT (contains wp_dist)
             # -------------------------------
             if msg_type == "NAV_CONTROLLER_OUTPUT":
-                self.wp_dist = msg.wp_dist  # Distance to waypoint in meters
+                self.wp_dist = msg.wp_dist
                 logger.debug(f"Distance to WP{self.last_wp}: {self.wp_dist:.2f}m")
 
             # -------------------------------

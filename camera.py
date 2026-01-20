@@ -9,7 +9,19 @@ import config
 logger = logging.getLogger(__name__)
 
 class Camera:
-    def __init__(self):
+    def __init__(self, focus_distance=None):
+        """
+        Initialize camera with optional fixed focus
+        
+        Args:
+            focus_distance: Focus distance in diopters (1/meters)
+                          - 0.0 = infinity focus (good for aerial photography)
+                          - 0.1 = 10 meters
+                          - 0.2 = 5 meters
+                          - 0.5 = 2 meters
+                          - 1.0 = 1 meter
+                          None = autofocus enabled
+        """
         config.ensure_directories()
 
         try:
@@ -23,6 +35,20 @@ class Camera:
                 buffer_count=2  # Double buffering for faster captures
             )
             self.picam2.configure(cam_config)
+            
+            # Set fixed focus if specified
+            if focus_distance is not None:
+                # Disable autofocus and set manual focus
+                self.picam2.set_controls({
+                    "AfMode": 0,  # 0 = Manual focus, 2 = Auto
+                    "LensPosition": focus_distance
+                })
+                logger.info(f"✓ Fixed focus set to {focus_distance} diopters")
+            else:
+                # Enable continuous autofocus
+                self.picam2.set_controls({"AfMode": 2})
+                logger.info("✓ Autofocus enabled")
+            
             self.picam2.start()
             
             logger.info("✓ Camera started successfully!")
