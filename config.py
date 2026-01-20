@@ -112,7 +112,7 @@ METRICS_WINDOW_SIZE = 10
 # ============================================================================  
 # BURST CAPTURE CONFIGURATION  
 # ============================================================================  
-BURST_CAPTURE_COUNT = 10  # Number of images per waypoint
+BURST_CAPTURE_COUNT = 5  # Number of images per waypoint
 BURST_INTERVAL = 0.1  # Seconds between captures
 BURST_STABILIZATION_DELAY = 0.2  # Extra delay if instability detected during burst
 
