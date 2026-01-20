@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# test_camera.py - Standalone camera focus test
+# test_camera.py - Test auto-lock focus system
 
 import time
 import logging
@@ -15,64 +15,45 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 def test_camera_focus():
-    """Test camera with different focus distances"""
+    """Test camera with different focus modes"""
     
     print("=" * 60)
-    print("🎥 CAMERA FOCUS & SHUTTER TEST")
+    print("🎥 CAMERA AUTO-LOCK FOCUS TEST")
     print("=" * 60)
     
-    # Ask user for focus distance
-    print("\nFocus distance options:")
-    print("  0.0 = Infinity (far away)")
-    print("  0.1 = 10 meters")
-    print("  0.2 = 5 meters")
-    print("  0.5 = 2 meters")
-    print("  1.0 = 1 meter")
-    print("  None = Autofocus enabled")
+    # Ask user for focus mode
+    print("\nFocus mode options:")
+    print("  1. auto_lock   - Autofocus once, then lock (RECOMMENDED)")
+    print("  2. infinity    - Lock at infinity (far distance)")
+    print("  3. fixed_1m    - Lock at 1 meter")
+    print("  4. fixed_5m    - Lock at 5 meters")
+    print("  5. continuous  - Continuous autofocus (not for drones)")
     
-    user_input = input("\nEnter focus distance (or press Enter for 1.0): ").strip()
+    user_input = input("\nEnter choice (1-5, or press Enter for auto_lock): ").strip()
     
-    if user_input == "":
-        focus_distance = 1.0
-    elif user_input.lower() == "none":
-        focus_distance = None
-    else:
-        try:
-            focus_distance = float(user_input)
-        except ValueError:
-            print("Invalid input, using default 1.0")
-            focus_distance = 1.0
+    focus_modes = {
+        "1": "auto_lock",
+        "2": "infinity",
+        "3": "fixed_1m",
+        "4": "fixed_5m",
+        "5": "continuous",
+        "": "auto_lock"
+    }
     
-    # Ask user for shutter speed
-    print("\nShutter speed options (for motion blur):")
-    print("  500  = 1/2000s (very fast - bright daylight)")
-    print("  1000 = 1/1000s (fast - recommended for drones)")
-    print("  2000 = 1/500s  (moderate)")
-    print("  None = Auto exposure")
+    focus_mode = focus_modes.get(user_input, "auto_lock")
     
-    shutter_input = input("\nEnter shutter speed in µs (or press Enter for 1000): ").strip()
-    
-    if shutter_input == "":
-        shutter_speed = 1000
-    elif shutter_input.lower() == "none":
-        shutter_speed = None
-    else:
-        try:
-            shutter_speed = int(shutter_input)
-        except ValueError:
-            print("Invalid input, using default 1000")
-            shutter_speed = 1000
-    
-    # Initialize camera with chosen settings
-    print(f"\n🔧 Initializing camera:")
-    print(f"   Focus distance: {focus_distance}")
-    print(f"   Shutter speed: {shutter_speed}µs" if shutter_speed else "   Shutter speed: Auto")
+    # Initialize camera with chosen focus mode
+    print(f"\n🔧 Initializing camera with focus_mode='{focus_mode}'")
+    print("=" * 60)
     
     try:
-        camera = Camera(focus_distance=focus_distance, shutter_speed_us=shutter_speed)
+        camera = Camera(focus_mode=focus_mode)
+        print("=" * 60)
         print("✓ Camera initialized successfully!")
     except Exception as e:
         print(f"❌ Failed to initialize camera: {e}")
+        import traceback
+        traceback.print_exc()
         return
     
     # Countdown
@@ -93,7 +74,7 @@ def test_camera_focus():
     for i in range(num_test_images):
         try:
             timestamp = time.strftime("%Y%m%dT%H%M%S")
-            filename = f"test_f{focus_distance}_s{shutter_speed}_{timestamp}_{i}.jpg"
+            filename = f"test_{focus_mode}_{timestamp}_{i}.jpg"
             filepath = test_dir / filename
             
             camera.picam2.capture_file(str(filepath))
@@ -107,7 +88,7 @@ def test_camera_focus():
                 print(f"  ❌ Image {i+1} failed to save")
             
             if i < num_test_images - 1:
-                time.sleep(0.5)  # Small delay between captures
+                time.sleep(0.3)  # Small delay between captures
                 
         except Exception as e:
             print(f"  ❌ Error capturing image {i+1}: {e}")
@@ -120,17 +101,21 @@ def test_camera_focus():
     print("\n" + "=" * 60)
     print("✅ TEST COMPLETE!")
     print("=" * 60)
-    print(f"Focus distance used: {focus_distance}")
-    print(f"Shutter speed used: {shutter_speed}µs" if shutter_speed else "Shutter speed: Auto")
+    print(f"Focus mode used: {focus_mode}")
     print(f"Images captured: {len(captured_files)}/{num_test_images}")
     print(f"Saved to: {test_dir}")
     print("\nCaptured files:")
     for f in captured_files:
-        print(f"  - {f}")
-    print("\n💡 Review the images to check quality!")
-    print("   If blurry due to motion: decrease shutter speed (500 or lower)")
-    print("   If blurry due to focus: adjust focus distance")
-    print("   If too dark: increase shutter speed or use auto")
+        print(f"  - {Path(f).name}")
+    print("\n💡 NEXT STEPS:")
+    print("   1. Review the images to check sharpness")
+    print("   2. If images are sharp and clear → SUCCESS! Use this mode")
+    print("   3. If blurry:")
+    print("      - Try 'infinity' mode for high altitude flights")
+    print("      - Try 'fixed_5m' for medium altitude (2-10m)")
+    print("      - Ensure drone is stable when hovering")
+    print("\n   Note: Motion blur during flight means drone vibration")
+    print("         is too high - increase STABILIZATION_DELAY in config")
     print("=" * 60)
 
 if __name__ == "__main__":

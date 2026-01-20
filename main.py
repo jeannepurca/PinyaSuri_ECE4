@@ -349,7 +349,7 @@ def main():
     logger.setLevel(logging.INFO)
     
     pixhawk = Pixhawk()
-    camera = Camera(focus_distance=config.CAMERA_FOCUS_DISTANCE, shutter_speed_us=config.CAMERA_SHUTTER_SPEED)
+    camera = Camera(focus_mode=config.CAMERA_FOCUS_MODE)
     next_flight_number = get_next_daily_flight_number()
     metrics = FlightMetricsLogger(flight_number=next_flight_number)
 

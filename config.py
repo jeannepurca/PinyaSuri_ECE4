@@ -104,8 +104,8 @@ BURST_INTERVAL = 0.2  # Seconds between captures
 # ============================================================================  
 # CAMERA CONFIGURATION  
 # ============================================================================  
-CAMERA_FOCUS_DISTANCE = 1.0  # 1 meter focus
-CAMERA_SHUTTER_SPEED = 2000 # 1/1000s - fast shutter to freeze motion
+CAMERA_FOCUS_MODE = "auto_lock"  # Auto-calibrate on startup, then lock
+# Other options: "infinity", "fixed_1m", "fixed_5m", "continuous"
 
 
 # ============================================================================  
