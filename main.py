@@ -107,7 +107,7 @@ def log_detection_results(flight_id, flight_number, waypoint, burst_id, burst_in
 # ----------------------------
 # Capture handler WITH DETECTION
 # ----------------------------
-def handle_waypoint_capture(pixhawk, camera, ai_detector, metrics, waypoint, flight_number, captured_wp, logger):
+def handle_waypoint_capture(pixhawk, camera, classifier, metrics, waypoint, flight_number, captured_wp, logger):
     """Capture burst images at waypoint with AI detection"""
     if waypoint in captured_wp:
         return False
@@ -197,7 +197,7 @@ def handle_waypoint_capture(pixhawk, camera, ai_detector, metrics, waypoint, fli
                     
                     if frame is not None:
                         # Run detection with NMS
-                        detections = ai_detector.detect_with_nms(frame)
+                        detections = classifier.detect_with_nms(frame)
                         
                         # Log results
                         log_detection_results(
@@ -213,7 +213,7 @@ def handle_waypoint_capture(pixhawk, camera, ai_detector, metrics, waypoint, fli
                         
                         # Log summary
                         if detections:
-                            summary = ai_detector.get_detection_summary(detections)
+                            summary = classifier.get_detection_summary(detections)
                             logger.info(f"  🔍 AI: Found {summary['total_count']} pineapple(s)")
                             for class_name, count in summary['class_counts'].items():
                                 logger.info(f"     - {class_name}: {count}")
@@ -358,7 +358,7 @@ def should_capture_image(pixhawk, waypoint, captured_wp, logger):
     return True
 
 
-def main_loop(pixhawk, camera, metrics, logger):
+def main_loop(pixhawk, camera, classifier, metrics, logger):
     captured_wp = set()
     flight_number = metrics.flight_number
     was_armed = False
