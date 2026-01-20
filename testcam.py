@@ -18,7 +18,7 @@ def test_camera_focus():
     """Test camera with different focus distances"""
     
     print("=" * 60)
-    print("🎥 CAMERA FOCUS TEST")
+    print("🎥 CAMERA FOCUS & SHUTTER TEST")
     print("=" * 60)
     
     # Ask user for focus distance
@@ -30,23 +30,46 @@ def test_camera_focus():
     print("  1.0 = 1 meter")
     print("  None = Autofocus enabled")
     
-    user_input = input("\nEnter focus distance (or press Enter for 0.2): ").strip()
+    user_input = input("\nEnter focus distance (or press Enter for 1.0): ").strip()
     
     if user_input == "":
-        focus_distance = 0.2
+        focus_distance = 1.0
     elif user_input.lower() == "none":
         focus_distance = None
     else:
         try:
             focus_distance = float(user_input)
         except ValueError:
-            print("Invalid input, using default 0.2")
-            focus_distance = 0.2
+            print("Invalid input, using default 1.0")
+            focus_distance = 1.0
     
-    # Initialize camera with chosen focus
-    print(f"\n🔧 Initializing camera with focus_distance={focus_distance}")
+    # Ask user for shutter speed
+    print("\nShutter speed options (for motion blur):")
+    print("  500  = 1/2000s (very fast - bright daylight)")
+    print("  1000 = 1/1000s (fast - recommended for drones)")
+    print("  2000 = 1/500s  (moderate)")
+    print("  None = Auto exposure")
+    
+    shutter_input = input("\nEnter shutter speed in µs (or press Enter for 1000): ").strip()
+    
+    if shutter_input == "":
+        shutter_speed = 1000
+    elif shutter_input.lower() == "none":
+        shutter_speed = None
+    else:
+        try:
+            shutter_speed = int(shutter_input)
+        except ValueError:
+            print("Invalid input, using default 1000")
+            shutter_speed = 1000
+    
+    # Initialize camera with chosen settings
+    print(f"\n🔧 Initializing camera:")
+    print(f"   Focus distance: {focus_distance}")
+    print(f"   Shutter speed: {shutter_speed}µs" if shutter_speed else "   Shutter speed: Auto")
+    
     try:
-        camera = Camera(focus_distance=focus_distance)
+        camera = Camera(focus_distance=focus_distance, shutter_speed_us=shutter_speed)
         print("✓ Camera initialized successfully!")
     except Exception as e:
         print(f"❌ Failed to initialize camera: {e}")
@@ -70,7 +93,7 @@ def test_camera_focus():
     for i in range(num_test_images):
         try:
             timestamp = time.strftime("%Y%m%dT%H%M%S")
-            filename = f"focus_test_{focus_distance}_{timestamp}_{i}.jpg"
+            filename = f"test_f{focus_distance}_s{shutter_speed}_{timestamp}_{i}.jpg"
             filepath = test_dir / filename
             
             camera.picam2.capture_file(str(filepath))
@@ -98,13 +121,16 @@ def test_camera_focus():
     print("✅ TEST COMPLETE!")
     print("=" * 60)
     print(f"Focus distance used: {focus_distance}")
+    print(f"Shutter speed used: {shutter_speed}µs" if shutter_speed else "Shutter speed: Auto")
     print(f"Images captured: {len(captured_files)}/{num_test_images}")
     print(f"Saved to: {test_dir}")
     print("\nCaptured files:")
     for f in captured_files:
         print(f"  - {f}")
-    print("\n💡 Review the images to check if focus is good!")
-    print("   If blurry, try a different focus distance.")
+    print("\n💡 Review the images to check quality!")
+    print("   If blurry due to motion: decrease shutter speed (500 or lower)")
+    print("   If blurry due to focus: adjust focus distance")
+    print("   If too dark: increase shutter speed or use auto")
     print("=" * 60)
 
 if __name__ == "__main__":

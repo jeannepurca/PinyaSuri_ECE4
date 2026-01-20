@@ -93,12 +93,19 @@ WAYPOINT_CAPTURE_DISTANCE = 1.5  # meters - trigger capture when within this dis
 HOVER_SPEED_THRESHOLD = 0.5 # m/s
 STABILIZATION_DELAY = 1.5  # seconds
 
+
 # ============================================================================  
 # BURST CAPTURE CONFIGURATION  
 # ============================================================================  
 BURST_CAPTURE_COUNT = 5  # Number of images per waypoint
 BURST_INTERVAL = 0.2  # Seconds between captures
-CAMERA_FOCUS_DISTANCE = 0.2  # Focus at 5 meters (0.2 diopters = 1/5m)
+
+
+# ============================================================================  
+# CAMERA CONFIGURATION  
+# ============================================================================  
+CAMERA_FOCUS_DISTANCE = 1.0  # 1 meter focus
+CAMERA_SHUTTER_SPEED = 1000 # 1/1000s - fast shutter to freeze motion
 
 
 # ============================================================================  

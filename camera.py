@@ -9,18 +9,21 @@ import config
 logger = logging.getLogger(__name__)
 
 class Camera:
-    def __init__(self, focus_distance=None):
+    def __init__(self, focus_distance=None, shutter_speed_us=None):
         """
-        Initialize camera with optional fixed focus
+        Initialize camera with optional fixed focus and shutter speed
         
         Args:
             focus_distance: Focus distance in diopters (1/meters)
-                          - 0.0 = infinity focus (good for aerial photography)
-                          - 0.1 = 10 meters
+                          - 0.0 = infinity focus
                           - 0.2 = 5 meters
-                          - 0.5 = 2 meters
                           - 1.0 = 1 meter
                           None = autofocus enabled
+            shutter_speed_us: Shutter speed in microseconds
+                          - 500 = 1/2000s (very fast, good for motion)
+                          - 1000 = 1/1000s (fast)
+                          - 2000 = 1/500s (moderate)
+                          None = auto exposure
         """
         config.ensure_directories()
 
@@ -29,25 +32,38 @@ class Camera:
             self.picam2 = Picamera2()
             
             # Use faster configuration optimized for burst capture
-            # Still uses high resolution but with faster processing
             cam_config = self.picam2.create_still_configuration(
                 main={"size": (4056, 3040)},
                 buffer_count=2  # Double buffering for faster captures
             )
             self.picam2.configure(cam_config)
             
+            # Build controls dictionary
+            controls = {}
+            
             # Set fixed focus if specified
             if focus_distance is not None:
-                # Disable autofocus and set manual focus
-                self.picam2.set_controls({
-                    "AfMode": 0,  # 0 = Manual focus, 2 = Auto
-                    "LensPosition": focus_distance
-                })
+                controls["AfMode"] = 0  # Manual focus
+                controls["LensPosition"] = focus_distance
                 logger.info(f"✓ Fixed focus set to {focus_distance} diopters")
             else:
-                # Enable continuous autofocus
-                self.picam2.set_controls({"AfMode": 2})
+                controls["AfMode"] = 2  # Continuous autofocus
                 logger.info("✓ Autofocus enabled")
+            
+            # Set shutter speed if specified (critical for motion blur)
+            if shutter_speed_us is not None:
+                controls["ExposureTime"] = shutter_speed_us
+                # Also disable auto exposure to maintain fixed shutter
+                controls["AeEnable"] = False
+                # Set reasonable ISO to compensate for fast shutter
+                controls["AnalogueGain"] = 4.0  # ISO 400 equivalent
+                logger.info(f"✓ Shutter speed set to {shutter_speed_us}µs (1/{1000000//shutter_speed_us}s)")
+            else:
+                controls["AeEnable"] = True  # Auto exposure
+                logger.info("✓ Auto exposure enabled")
+            
+            # Apply all controls
+            self.picam2.set_controls(controls)
             
             self.picam2.start()
             
