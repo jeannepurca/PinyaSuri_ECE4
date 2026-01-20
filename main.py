@@ -266,6 +266,14 @@ def main_loop(pixhawk, camera, metrics, logger):
             current_mode = pixhawk.mode
             logger.info(f"> Flight Mode: {current_mode}")
 
+        # Check for waypoint changes
+        if pixhawk.armed and pixhawk.last_wp != current_waypoint:
+            current_waypoint = pixhawk.last_wp
+            wp_name = config.get_waypoint_name(current_waypoint)
+            wp_type = config.get_waypoint_type(current_waypoint)
+            
+            logger.info(f"📍 Navigating to {wp_name} (WP{current_waypoint}) [{wp_type}]")
+
         # PERIODIC DEBUG OUTPUT (every 2 seconds when armed)
         if pixhawk.armed and (time.time() - last_debug_time) > 2.0:
             last_debug_time = time.time()
