@@ -111,7 +111,8 @@ BURST_INTERVAL = 0.5  # Seconds between captures
 # AI CONFIGURATION  
 # ============================================================================  
 SERVER = "http://WEB_SERVER_IP:5000"
-MODEL_PATH = MODEL_DIR / "pinyasuri_model.tflite"
+MODEL_PATH = MODEL_DIR / "YOLOv8n_PinyaSuri_AI.tflite"
+DETECTION_THRESHOLD = 0.5
 
 CLASS_NAMES = {
     0: "Healthy",
