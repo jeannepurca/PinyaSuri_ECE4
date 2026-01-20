@@ -184,46 +184,51 @@ def should_capture_image(pixhawk, waypoint, captured_wp, logger):
         logger.debug("❌ Check failed: Not armed")
         return False
     
-    # 2. Must have valid waypoint
+    # 2. Must be in AUTO mode
+    if pixhawk.mode != "AUTO":
+        logger.debug(f"❌ Check failed: Not in AUTO mode (current: {pixhawk.mode})")
+        return False
+    
+    # 3. Must have valid waypoint
     if not waypoint:
         logger.debug("❌ Check failed: No waypoint")
         return False
     
-    # 3. Must have position data from GPS
+    # 4. Must have position data from GPS
     if not pixhawk.position:
         logger.debug("❌ Check failed: No position data")
         return False
     
-    # 4. Must be in the air
+    # 5. Must be in the air
     if not is_drone_in_air(pixhawk):
         alt = pixhawk.position['rel_alt'] if pixhawk.position else 0
         logger.debug(f"❌ Check failed: Altitude {alt:.2f}m not in range "
                     f"[{config.MIN_ALTITUDE_FOR_CAPTURE}m - {config.MAX_ALTITUDE_FOR_CAPTURE}m]")
         return False
     
-    # 5. Must NOT have already captured this waypoint
+    # 6. Must NOT have already captured this waypoint
     if waypoint in captured_wp:
         logger.debug(f"❌ Check failed: Already captured WP{waypoint}")
         return False
     
-    # 6. Must capture only at survey/mapping waypoints (exclude last waypoint)
+    # 7. Must capture only at survey/mapping waypoints (exclude last waypoint)
     last_wp = pixhawk.get_last_waypoint()
     if not config.is_mapping_waypoint(waypoint, last_wp):
         logger.debug(f"❌ Check failed: WP{waypoint} is not a mapping waypoint")
         return False
 
-    # 7. Must have distance data
+    # 8. Must have distance data
     if pixhawk.wp_dist is None:
         logger.debug(f"❌ Check failed: No distance data available yet")
         return False
     
-    # 8. Must be hovering
+    # 9. Must be hovering
     if pixhawk.groundspeed > config.HOVER_SPEED_THRESHOLD:
         logger.debug(f"❌ Check failed: Still moving at {pixhawk.groundspeed:.2f} m/s "
                     f"(threshold: {config.HOVER_SPEED_THRESHOLD} m/s)")
         return False
     
-    # 9. Must be within capture distance
+    # 10. Must be within capture distance
     if pixhawk.wp_dist > config.WAYPOINT_CAPTURE_DISTANCE:
         logger.debug(f"❌ Check failed: Too far from WP{waypoint} "
                     f"({pixhawk.wp_dist:.2f}m > {config.WAYPOINT_CAPTURE_DISTANCE}m)")
@@ -232,7 +237,6 @@ def should_capture_image(pixhawk, waypoint, captured_wp, logger):
     # All checks passed!
     logger.info("=" * 60)
     logger.info(f"✅ ALL CHECKS PASSED - Triggering capture for WP{waypoint}!")
-    logger.info(f"   Armed: {pixhawk.armed}")
     logger.info(f"   Altitude: {pixhawk.position['rel_alt']:.2f}m")
     logger.info(f"   Distance to waypoint: {pixhawk.wp_dist:.2f}m")
     logger.info(f"   Groundspeed: {pixhawk.groundspeed:.2f} m/s")
