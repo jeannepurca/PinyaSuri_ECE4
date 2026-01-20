@@ -60,7 +60,7 @@ def log_image_capture(flight_id, flight_number, waypoint, position, burst_id, bu
 # Capture handler
 # ----------------------------
 def handle_waypoint_capture(pixhawk, camera, metrics, waypoint, flight_number, captured_wp, logger):
-    """Capture burst images at waypoint - FAST VERSION"""
+    """Capture burst images at waypoint - FAST VERSION with mode change detection"""
     if waypoint in captured_wp:
         return False
         
@@ -69,11 +69,30 @@ def handle_waypoint_capture(pixhawk, camera, metrics, waypoint, flight_number, c
     logger.info(f">>> {wp_name} (WP{waypoint}) REACHED - Capturing burst images...")
     logger.info("=" * 60)
     
-    # Wait for drone to fully stabilize
+    # Wait for drone to fully stabilize WITH MODE CHECKING
     logger.info(f"⏳ Waiting {config.STABILIZATION_DELAY}s for drone to settle...")
-    time.sleep(config.STABILIZATION_DELAY)
+    stabilization_start = time.time()
+    
+    while (time.time() - stabilization_start) < config.STABILIZATION_DELAY:
+        pixhawk.update()  # Keep updating telemetry
+        
+        # Check if mode changed from AUTO
+        if pixhawk.mode != "AUTO":
+            logger.warning("=" * 60)
+            logger.warning(f"⚠️ CAPTURE ABORTED - Mode changed to {pixhawk.mode}")
+            logger.warning("=" * 60)
+            return False
+        
+        time.sleep(0.1)  # Check every 100ms
 
-    pixhawk.update()  # Get latest data
+    pixhawk.update()  # Get latest data after stabilization
+    
+    # Final mode check before starting burst
+    if pixhawk.mode != "AUTO":
+        logger.warning("=" * 60)
+        logger.warning(f"⚠️ CAPTURE ABORTED - Not in AUTO mode ({pixhawk.mode})")
+        logger.warning("=" * 60)
+        return False
     
     # Burst capture
     num_captures = config.BURST_CAPTURE_COUNT
@@ -84,6 +103,19 @@ def handle_waypoint_capture(pixhawk, camera, metrics, waypoint, flight_number, c
     logger.info(f"📸 Starting burst capture ({num_captures} frames)...")
 
     for i in range(num_captures):
+        # Check mode before each capture
+        pixhawk.update()
+        if pixhawk.mode != "AUTO":
+            logger.warning("=" * 60)
+            logger.warning(f"⚠️ BURST ABORTED at frame {i+1}/{num_captures} - Mode changed to {pixhawk.mode}")
+            logger.warning(f"   Captured {len(captured_images)} images before abort")
+            logger.warning("=" * 60)
+            
+            # Mark as captured if we got at least one image
+            if captured_images:
+                captured_wp.add(waypoint)
+            return len(captured_images) > 0
+        
         try:
             image_path = camera.capture(
                 waypoint=waypoint,
