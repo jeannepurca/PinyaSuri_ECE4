@@ -39,23 +39,10 @@ CLASSIFICATION_CSV = LOG_DIR / "ai_classifications.csv"
 FLIGHT_LOG_FILE = get_flight_log_file()
 
 
-# Stability thresholds
-HOVER_SPEED_THRESHOLD = 0.8 # m/s
-STABILIZATION_DELAY = 1.5  # seconds
-
-# ALTITUDE_STABILITY_THRESHOLD = 1.0  # m
-# STABILITY_WAIT_TIME = 1.5  # seconds
-# STABILITY_CHECK_INTERVAL = 0.2  # seconds
-# STABILITY_CHECKS_NEEDED = 1
-
 # ============================================================================  
 # IMAGE CAPTURE DIRECTORY (daily subfolders)  
 # ============================================================================  
 def get_image_day_dir():
-    """
-    Returns the Path for today's image folder.
-    Creates the folder if it doesn't exist.
-    """
     date_str = datetime.utcnow().strftime("%Y%m%d")  # YYYYMMDD
     day_folder = IMAGE_DIR / date_str
     day_folder.mkdir(parents=True, exist_ok=True)
@@ -99,22 +86,19 @@ def get_waypoint_type(wp_number):
 # ============================================================================  
 # FLIGHT CAPTURE CONFIGURATION  
 # ============================================================================  
+MAIN_LOOP_INTERVAL = 0.05  # seconds
 MIN_ALTITUDE_FOR_CAPTURE = 0.5  # meters - minimum altitude (safety floor)
 MAX_ALTITUDE_FOR_CAPTURE = 2.5  # meters - maximum altitude (upper limit)
-
 WAYPOINT_CAPTURE_DISTANCE = 1.5  # meters - trigger capture when within this distance
-
-MAIN_LOOP_INTERVAL = 0.05  # seconds
-METRICS_LOG_INTERVAL = 0.5  # seconds
-METRICS_WINDOW_SIZE = 10
-
+HOVER_SPEED_THRESHOLD = 0.5 # m/s
+STABILIZATION_DELAY = 1.5  # seconds
 
 # ============================================================================  
 # BURST CAPTURE CONFIGURATION  
 # ============================================================================  
 BURST_CAPTURE_COUNT = 5  # Number of images per waypoint
-BURST_INTERVAL = 0.1  # Seconds between captures
-BURST_STABILIZATION_DELAY = 0.2  # Extra delay if instability detected during burst
+BURST_INTERVAL = 0.2  # Seconds between captures
+CAMERA_FOCUS_DISTANCE = 0.2  # Focus at 5 meters (0.2 diopters = 1/5m)
 
 
 # ============================================================================  

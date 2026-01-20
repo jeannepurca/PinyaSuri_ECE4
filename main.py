@@ -69,7 +69,7 @@ def handle_waypoint_capture(pixhawk, camera, metrics, waypoint, flight_number, c
     logger.info(f">>> {wp_name} (WP{waypoint}) REACHED - Capturing burst images...")
     logger.info("=" * 60)
     
-    # ✨ NEW: Wait for drone to fully stabilize
+    # Wait for drone to fully stabilize
     logger.info(f"⏳ Waiting {config.STABILIZATION_DELAY}s for drone to settle...")
     time.sleep(config.STABILIZATION_DELAY)
 
@@ -178,7 +178,6 @@ def is_drone_in_air(pixhawk):
     return in_range
 
 def should_capture_image(pixhawk, waypoint, captured_wp, logger):
-    """PROXIMITY-BASED VERSION - uses wp_dist instead of reached log"""
 
     # 1. Must be armed
     if not pixhawk.armed:
@@ -212,17 +211,18 @@ def should_capture_image(pixhawk, waypoint, captured_wp, logger):
         logger.debug(f"❌ Check failed: WP{waypoint} is not a mapping waypoint")
         return False
 
-    # ✨ NEW: 7. Must be close to waypoint (using distance, not reached log)
+    # 7. Must be close to waypoint
     if pixhawk.wp_dist is None:
         logger.debug(f"❌ Check failed: No distance data available yet")
         return False
     
-    # ✨ NEW: 8. Must be hovering (nearly stopped)
+    # 8. Must be hovering
     if pixhawk.groundspeed > config.HOVER_SPEED_THRESHOLD:
         logger.debug(f"❌ Check failed: Still moving at {pixhawk.groundspeed:.2f} m/s "
                     f"(threshold: {config.HOVER_SPEED_THRESHOLD} m/s)")
         return False
     
+    # 9. Must be within capture distance
     if pixhawk.wp_dist > config.WAYPOINT_CAPTURE_DISTANCE:
         logger.debug(f"❌ Check failed: Too far from WP{waypoint} "
                     f"({pixhawk.wp_dist:.2f}m > {config.WAYPOINT_CAPTURE_DISTANCE}m)")
@@ -266,7 +266,7 @@ def main_loop(pixhawk, camera, metrics, logger):
         # PERIODIC DEBUG OUTPUT (every 2 seconds when armed)
         if pixhawk.armed and (time.time() - last_debug_time) > 2.0:
             last_debug_time = time.time()
-            # ✨ UPDATED: Show distance instead of reached log
+            # Show distance instead of reached log
             dist_str = f"{pixhawk.wp_dist:.2f}m" if pixhawk.wp_dist else "N/A"
             logger.debug(f"[STATUS] Mode: {pixhawk.mode}, WP: {pixhawk.last_wp}, "
                         f"Alt: {pixhawk.position['rel_alt']:.1f}m, "
@@ -290,7 +290,6 @@ def main_loop(pixhawk, camera, metrics, logger):
                 },
                 "waypoint_index": pixhawk.last_wp,
                 "flight_mode": pixhawk.mode,
-                "nav_state": pixhawk.nav_state,
                 "is_hovering": pixhawk.is_hovering(threshold=1.0),
                 "battery": {
                     "voltage": pixhawk.battery_voltage,
@@ -308,7 +307,7 @@ def main_loop(pixhawk, camera, metrics, logger):
                 pixhawk.last_wp, flight_number, captured_wp, logger
             )
         
-        time.sleep(config.MAIN_LOOP_INTERVAL)   # Fast loop
+        time.sleep(config.MAIN_LOOP_INTERVAL)
     
     return was_armed
 
@@ -348,7 +347,7 @@ def main():
     logger.setLevel(logging.INFO)
     
     pixhawk = Pixhawk()
-    camera = Camera()
+    camera = Camera(focus_distance=config.CAMERA_FOCUS_DISTANCE)
     next_flight_number = get_next_daily_flight_number()
     metrics = FlightMetricsLogger(flight_number=next_flight_number)
 

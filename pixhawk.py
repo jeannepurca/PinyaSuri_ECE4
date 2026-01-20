@@ -145,7 +145,9 @@ class Pixhawk:
                 self.pitch = math.degrees(msg.pitch)
                 self.yaw = math.degrees(msg.yaw)
 
-            # ✨ NEW: Navigation Controller Output (contains wp_dist)
+            # -------------------------------
+            # NAVIGATION CONTROLLER OUTPUT (contains wp_dist)
+            # -------------------------------
             if msg_type == "NAV_CONTROLLER_OUTPUT":
                 self.wp_dist = msg.wp_dist  # Distance to waypoint in meters
                 logger.debug(f"Distance to WP{self.last_wp}: {self.wp_dist:.2f}m")

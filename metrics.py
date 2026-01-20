@@ -82,7 +82,6 @@ class FlightMetricsLogger:
                     "waypoint_index",
                     "waypoint_lat_deg", "waypoint_lon_deg", "waypoint_alt_m",
                     "flight_mode",
-                    "nav_state",
                     "is_hovering",
                     "battery_voltage_V",
                     "battery_current_A",
@@ -139,7 +138,6 @@ class FlightMetricsLogger:
 
         # Flight state
         flight_mode = data.get("flight_mode", "UNKNOWN")
-        nav_state = data.get("nav_state", "UNKNOWN")
 
         # Battery - handle None values properly
         battery_voltage = data.get("battery", {}).get("voltage", 0.0) or 0.0
@@ -160,7 +158,6 @@ class FlightMetricsLogger:
                 wp_index,
                 round(wp_lat, 7), round(wp_lon, 7), round(wp_alt, 2),
                 flight_mode,
-                nav_state,
                 data.get("is_hovering", False),
                 round(battery_voltage, 2),
                 round(battery_current, 2),
