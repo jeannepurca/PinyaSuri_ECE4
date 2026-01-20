@@ -245,6 +245,7 @@ def main_loop(pixhawk, camera, metrics, logger):
     flight_number = metrics.flight_number
     was_armed = False
     current_mode = "UNKNOWN"
+    current_waypoint = None  # ✅ Initialize here at the start
     last_debug_time = 0
     
     logger.info("=" * 60)
@@ -266,8 +267,8 @@ def main_loop(pixhawk, camera, metrics, logger):
             current_mode = pixhawk.mode
             logger.info(f"> Flight Mode: {current_mode}")
 
-        # Check for waypoint changes
-        if pixhawk.armed and pixhawk.last_wp != current_waypoint:
+        # Check for waypoint changes (only when armed and waypoint is valid)
+        if pixhawk.armed and pixhawk.last_wp is not None and pixhawk.last_wp != current_waypoint:
             current_waypoint = pixhawk.last_wp
             wp_name = config.get_waypoint_name(current_waypoint)
             wp_type = config.get_waypoint_type(current_waypoint)
