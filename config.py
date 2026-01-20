@@ -91,7 +91,7 @@ MIN_ALTITUDE_FOR_CAPTURE = 0.5  # meters - minimum altitude (safety floor)
 MAX_ALTITUDE_FOR_CAPTURE = 2.5  # meters - maximum altitude (upper limit)
 WAYPOINT_CAPTURE_DISTANCE = 1.5  # meters - trigger capture when within this distance
 HOVER_SPEED_THRESHOLD = 0.5 # m/s
-STABILIZATION_DELAY = 1.5  # seconds
+STABILIZATION_DELAY = 2  # seconds
 
 
 # ============================================================================  
@@ -99,13 +99,6 @@ STABILIZATION_DELAY = 1.5  # seconds
 # ============================================================================  
 BURST_CAPTURE_COUNT = 5  # Number of images per waypoint
 BURST_INTERVAL = 0.2  # Seconds between captures
-
-
-# ============================================================================  
-# CAMERA CONFIGURATION  
-# ============================================================================  
-CAMERA_FOCUS_MODE = "auto_lock"  # Auto-calibrate on startup, then lock
-# Other options: "infinity", "fixed_1m", "fixed_5m", "continuous"
 
 
 # ============================================================================  
