@@ -6,10 +6,12 @@ import csv
 import logging
 import sys
 from pathlib import Path
+import classifier
 import config
 from logging_config import setup_logging
 from pixhawk import Pixhawk
 from camera import Camera
+from classifier import PinyaSuriAI
 from metrics import get_next_daily_flight_number
 from metrics import FlightMetricsLogger
 
@@ -35,6 +37,21 @@ def initialize_csv():
                 "burst_index",
                 "image_path"
             ])
+    
+    if not config.CLASSIFICATION_CSV.exists():
+        with open(config.CLASSIFICATION_CSV, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                "timestamp",
+                "flight_id",
+                "flight_number",
+                "waypoint",
+                "burst_id",
+                "burst_index",
+                "image_path",
+                "detection_count",
+                "detections"  # JSON string of all detections
+            ])
 
 def log_image_capture(flight_id, flight_number, waypoint, position, burst_id, burst_index, image_path, logger):
     """Append image capture record to CSV with error handling"""
@@ -56,11 +73,42 @@ def log_image_capture(flight_id, flight_number, waypoint, position, burst_id, bu
     except Exception as e:
         logger.error(f"Failed to log image capture to CSV: {e}")
 
+def log_detection_results(flight_id, flight_number, waypoint, burst_id, burst_index, image_path, detections, logger):
+    """Log AI detection results to CSV"""
+    try:
+        import json
+        
+        detection_count = len(detections)
+        detections_json = json.dumps([{
+            'class': d['class_name'],
+            'confidence': round(d['confidence'], 3),
+            'bbox': [round(x, 4) for x in d['bbox']]
+        } for d in detections])
+        
+        with open(config.CLASSIFICATION_CSV, "a", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                time.time(),
+                flight_id,
+                flight_number,
+                waypoint,
+                burst_id,
+                burst_index,
+                image_path,
+                detection_count,
+                detections_json
+            ])
+    except Exception as e:
+        logger.error(f"Failed to log detection results: {e}")
+
 # ----------------------------
 # Capture handler
 # ----------------------------
-def handle_waypoint_capture(pixhawk, camera, metrics, waypoint, flight_number, captured_wp, logger):
-    """Capture burst images at waypoint - FAST VERSION with mode change detection"""
+# ----------------------------
+# Capture handler WITH DETECTION
+# ----------------------------
+def handle_waypoint_capture(pixhawk, camera, classifier, metrics, waypoint, flight_number, captured_wp, logger):
+    """Capture burst images at waypoint with AI detection"""
     if waypoint in captured_wp:
         return False
         
@@ -74,36 +122,33 @@ def handle_waypoint_capture(pixhawk, camera, metrics, waypoint, flight_number, c
     stabilization_start = time.time()
     
     while (time.time() - stabilization_start) < config.STABILIZATION_DELAY:
-        pixhawk.update()  # Keep updating telemetry
+        pixhawk.update()
         
-        # Check if mode changed from AUTO
         if pixhawk.mode != "AUTO":
             logger.warning("=" * 60)
             logger.warning(f"⚠️ CAPTURE ABORTED - Mode changed to {pixhawk.mode}")
             logger.warning("=" * 60)
             return False
         
-        time.sleep(0.1)  # Check every 100ms
+        time.sleep(0.1)
 
-    pixhawk.update()  # Get latest data after stabilization
+    pixhawk.update()
     
-    # Final mode check before starting burst
     if pixhawk.mode != "AUTO":
         logger.warning("=" * 60)
         logger.warning(f"⚠️ CAPTURE ABORTED - Not in AUTO mode ({pixhawk.mode})")
         logger.warning("=" * 60)
         return False
     
-    # Burst capture
+    # Burst capture WITH DETECTION
     num_captures = config.BURST_CAPTURE_COUNT
     burst_interval = config.BURST_INTERVAL
     captured_images = []
     burst_id = f"{metrics.flight_id}_wp{waypoint}_{int(time.time())}"
 
-    logger.info(f"📸 Starting burst capture ({num_captures} frames)...")
+    logger.info(f"📸 Starting burst capture with AI detection ({num_captures} frames)...")
 
     for i in range(num_captures):
-        # Check mode before each capture
         pixhawk.update()
         if pixhawk.mode != "AUTO":
             logger.warning("=" * 60)
@@ -111,12 +156,12 @@ def handle_waypoint_capture(pixhawk, camera, metrics, waypoint, flight_number, c
             logger.warning(f"   Captured {len(captured_images)} images before abort")
             logger.warning("=" * 60)
             
-            # Mark as captured if we got at least one image
             if captured_images:
                 captured_wp.add(waypoint)
             return len(captured_images) > 0
         
         try:
+            # Capture image
             image_path = camera.capture(
                 waypoint=waypoint,
                 flight_number=flight_number,
@@ -128,7 +173,7 @@ def handle_waypoint_capture(pixhawk, camera, metrics, waypoint, flight_number, c
             if Path(image_path).exists() and Path(image_path).stat().st_size > 1000:
                 captured_images.append(image_path)
                 
-                # Log with burst metadata
+                # Log image capture
                 log_image_capture(
                     metrics.flight_id, 
                     flight_number, 
@@ -142,6 +187,43 @@ def handle_waypoint_capture(pixhawk, camera, metrics, waypoint, flight_number, c
                 
                 logger.info(f"  ✓ Frame {i+1}/{num_captures} captured "
                            f"(size: {Path(image_path).stat().st_size / 1024:.1f} KB)")
+                
+                # ✅ ADD THIS - Run AI detection
+                try:
+                    import cv2
+                    
+                    # Load image
+                    frame = cv2.imread(image_path)
+                    
+                    if frame is not None:
+                        # Run detection with NMS
+                        detections = classifier.detect_with_nms(frame)
+                        
+                        # Log results
+                        log_detection_results(
+                            metrics.flight_id,
+                            flight_number,
+                            waypoint,
+                            burst_id,
+                            i,
+                            image_path,
+                            detections,
+                            logger
+                        )
+                        
+                        # Log summary
+                        if detections:
+                            summary = classifier.get_detection_summary(detections)
+                            logger.info(f"  🔍 AI: Found {summary['total_count']} pineapple(s)")
+                            for class_name, count in summary['class_counts'].items():
+                                logger.info(f"     - {class_name}: {count}")
+                        else:
+                            logger.info(f"  🔍 AI: No pineapples detected")
+                    else:
+                        logger.error(f"  ⚠️ Failed to load image for detection")
+                        
+                except Exception as e:
+                    logger.error(f"  ⚠️ AI detection failed: {e}")
             else:
                 logger.error(f"⚠ Frame {i+1} file invalid or too small")
             
@@ -276,12 +358,12 @@ def should_capture_image(pixhawk, waypoint, captured_wp, logger):
     return True
 
 
-def main_loop(pixhawk, camera, metrics, logger):
+def main_loop(pixhawk, camera, classifier, metrics, logger):
     captured_wp = set()
     flight_number = metrics.flight_number
     was_armed = False
     current_mode = "UNKNOWN"
-    current_waypoint = None  # ✅ Initialize here at the start
+    current_waypoint = None
     last_debug_time = 0
     
     logger.info("=" * 60)
@@ -351,7 +433,7 @@ def main_loop(pixhawk, camera, metrics, logger):
         # Check for image capture
         if should_capture_image(pixhawk, pixhawk.last_wp, captured_wp, logger):
             handle_waypoint_capture(
-                pixhawk, camera, metrics, 
+                pixhawk, camera, classifier, metrics,
                 pixhawk.last_wp, flight_number, captured_wp, logger
             )
         
@@ -390,12 +472,19 @@ def main():
     global running
     
     logger = setup_logging()
-    
-    # SET DEBUG LEVEL
     logger.setLevel(logging.INFO)
     
     pixhawk = Pixhawk()
     camera = Camera()
+
+    logger.info(">>> Initializing AI detector...")
+    try:
+        classifier = PinyaSuriAI()
+    except Exception as e:
+        logger.error(f"⚠️ Failed to initialize AI detector: {e}")
+        logger.error("   System will continue without AI detection")
+        classifier = None
+
     next_flight_number = get_next_daily_flight_number()
     metrics = FlightMetricsLogger(flight_number=next_flight_number)
 
@@ -408,7 +497,7 @@ def main():
         pixhawk.wait_for_connection()
         pixhawk.request_mission_count()
         initialize_csv()
-        was_armed = main_loop(pixhawk, camera, metrics, logger)
+        was_armed = main_loop(pixhawk, camera, classifier, metrics, logger)
     except KeyboardInterrupt:
         logger.info("")
         logger.info("=" * 60)
