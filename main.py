@@ -6,6 +6,7 @@ import csv
 import logging
 import sys
 from pathlib import Path
+
 import config
 from logging_config import setup_logging
 from pixhawk import Pixhawk
@@ -18,7 +19,7 @@ running = True
 # ----------------------------
 # CSV Initialization
 # ----------------------------
-def initialize_csv():
+def initialize_image_log():
     """Create image log CSV with headers if file doesn't exist"""
     if not config.IMAGE_LOG_CSV.exists():
         with open(config.IMAGE_LOG_CSV, "w", newline="") as f:
@@ -60,7 +61,7 @@ def log_image_capture(flight_id, flight_number, waypoint, position, burst_id, bu
 # Capture handler
 # ----------------------------
 def handle_waypoint_capture(pixhawk, camera, metrics, waypoint, flight_number, captured_wp, logger):
-    """Capture burst images at waypoint - FAST VERSION with mode change detection"""
+    """Capture burst images at waypoint"""
     if waypoint in captured_wp:
         return False
         
@@ -74,7 +75,7 @@ def handle_waypoint_capture(pixhawk, camera, metrics, waypoint, flight_number, c
     stabilization_start = time.time()
     
     while (time.time() - stabilization_start) < config.STABILIZATION_DELAY:
-        pixhawk.update()  # Keep updating telemetry
+        pixhawk.update()
         
         # Check if mode changed from AUTO
         if pixhawk.mode != "AUTO":
@@ -82,10 +83,10 @@ def handle_waypoint_capture(pixhawk, camera, metrics, waypoint, flight_number, c
             logger.warning(f"⚠️ CAPTURE ABORTED - Mode changed to {pixhawk.mode}")
             logger.warning("=" * 60)
             return False
-        
-        time.sleep(0.1)  # Check every 100ms
 
-    pixhawk.update()  # Get latest data after stabilization
+        time.sleep(0.1)
+
+    pixhawk.update()
     
     # Final mode check before starting burst
     if pixhawk.mode != "AUTO":
@@ -321,6 +322,9 @@ def main_loop(pixhawk, camera, metrics, logger):
                         f"Dist to WP: {dist_str}, "
                         f"Captured: {captured_wp}")
 
+        # Safe Waypoint Guard
+        wp = pixhawk.current_waypoint or {"lat": None, "lon": None, "alt": None}
+
         # Update metrics during flight
         if pixhawk.armed:
             telemetry = {
@@ -337,13 +341,12 @@ def main_loop(pixhawk, camera, metrics, logger):
                     "groundspeed": pixhawk.groundspeed
                 },
                 "waypoint_index": pixhawk.last_wp,
+                "waypoint_lat": wp["lat"],
+                "waypoint_lon": wp["lon"],
+                "waypoint_alt": wp["alt"],
                 "flight_mode": pixhawk.mode,
-                "is_hovering": pixhawk.is_hovering(threshold=1.0),
-                "battery": {
-                    "voltage": pixhawk.battery_voltage,
-                    "current": pixhawk.battery_current,
-                    "percentage": pixhawk.battery_remaining
-                }
+                "nav_state": pixhawk.nav_state,
+                "is_hovering": pixhawk.is_hovering(threshold=config.HOVER_SPEED_THRESHOLD),
             }
             metrics.log_telemetry(telemetry)
 
@@ -407,7 +410,8 @@ def main():
     try:
         pixhawk.wait_for_connection()
         pixhawk.request_mission_count()
-        initialize_csv()
+        pixhawk.request_mission_waypoints()
+        initialize_image_log()
         was_armed = main_loop(pixhawk, camera, metrics, logger)
     except KeyboardInterrupt:
         logger.info("")
