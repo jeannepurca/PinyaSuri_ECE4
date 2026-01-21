@@ -94,7 +94,7 @@ def get_waypoint_type(wp_number):
 # ============================================================================  
 MAIN_LOOP_INTERVAL = 0.05  # seconds
 MIN_ALTITUDE_FOR_CAPTURE = 0.5  # meters - minimum altitude (safety floor)
-MAX_ALTITUDE_FOR_CAPTURE = 2.5  # meters - maximum altitude (upper limit)
+MAX_ALTITUDE_FOR_CAPTURE = 4  # meters - maximum altitude (upper limit)
 WAYPOINT_CAPTURE_DISTANCE = 1.5  # meters - trigger capture when within this distance
 HOVER_SPEED_THRESHOLD = 0.5 # m/s
 STABILIZATION_DELAY = 2  # seconds
