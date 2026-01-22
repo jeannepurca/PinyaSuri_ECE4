@@ -103,11 +103,9 @@ def log_detection_results(flight_id, flight_number, waypoint, burst_id, burst_in
     except Exception as e:
         logger.error(f"Failed to log detection results: {e}")
 
+
 # ----------------------------
-# Capture handler
-# ----------------------------
-# ----------------------------
-# Capture handler WITH DETECTION
+# Capture Handler
 # ----------------------------
 def handle_waypoint_capture(pixhawk, camera, classifier, metrics, waypoint, flight_number, captured_wp, logger):
     """Capture burst images at waypoint with AI detection"""
@@ -163,7 +161,7 @@ def handle_waypoint_capture(pixhawk, camera, classifier, metrics, waypoint, flig
             return len(captured_images) > 0
         
         try:
-            # Capture image
+            # Capture original image
             image_path = camera.capture(
                 waypoint=waypoint,
                 flight_number=flight_number,
@@ -199,7 +197,20 @@ def handle_waypoint_capture(pixhawk, camera, classifier, metrics, waypoint, flig
                     
                     if frame is not None:
                         # Run detection with NMS
-                        detections = classifier.detect_with_nms(frame)
+                        detections = classifier.detect_with_nms(frame, iou_threshold=config.NMS_IOU_THRESHOLD)
+                        
+                        # Save detection image with bounding boxes
+                        detection_image_path = camera.save_detection_image(
+                            image_path,
+                            detections,
+                            waypoint,
+                            flight_number,
+                            prefix="detection",
+                            burst_index=i
+                        )
+                        
+                        if detection_image_path:
+                            logger.info(f"  ✓ Detection image saved: {Path(detection_image_path).name}")
                         
                         # Log results
                         log_detection_results(

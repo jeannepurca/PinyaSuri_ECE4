@@ -5,6 +5,7 @@ import logging
 import pathlib
 from datetime import datetime
 import config
+import cv2
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +53,113 @@ class Camera:
         except Exception as e:
             logger.error(f"⚠ Failed to capture {filename}: {e}")
             raise
+
+    def save_detection_image(self, image_path, detections, waypoint: int, 
+                            flight_number: int = 1, prefix="detection", burst_index=0):
+        """
+        Load captured image, draw bounding boxes, and save as new file
+        
+        Args:
+            image_path: Path to original captured image
+            detections: List of detection dictionaries from classifier
+            waypoint: Waypoint number
+            flight_number: Flight number
+            prefix: Filename prefix for detection image
+            burst_index: Burst image index
+            
+        Returns:
+            str: Path to saved detection image, or None if failed
+        """
+        try:
+            # Load the original image
+            frame = cv2.imread(image_path)
+            if frame is None:
+                logger.error(f"⚠ Failed to load image: {image_path}")
+                return None
+
+            # Get today's folder
+            date_folder = config.get_image_day_dir()
+
+            # Timestamp for filename
+            ts = datetime.utcnow().strftime("%Y%m%dT%H%M%S%f")[:-3]
+            
+            # Create filename for detection image
+            filename = f"{prefix}_flight{flight_number}_wp{waypoint}_burst{burst_index}_{ts}.jpg"
+            fullpath = date_folder / filename
+
+            # Draw bounding boxes if enabled and detections exist
+            if config.DRAW_BBOXES and detections:
+                frame = self._draw_bounding_boxes(frame, detections)
+            
+            # Save image
+            cv2.imwrite(str(fullpath), frame)
+            logger.debug(f"✓ Saved detection image: {filename}")
+            return str(fullpath)
+            
+        except Exception as e:
+            logger.error(f"⚠ Failed to save detection image: {e}")
+            return None
+
+    def _draw_bounding_boxes(self, frame, detections):
+        """
+        Draw bounding boxes and labels on frame
+        
+        Args:
+            frame: OpenCV BGR image
+            detections: List of detection dictionaries
+            
+        Returns:
+            Frame with bounding boxes drawn
+        """
+        for det in detections:
+            # Get bounding box in pixels
+            x1, y1, x2, y2 = det['bbox_pixels']
+            
+            # Get class info
+            class_idx = det['class_index']
+            class_name = det['class_name']
+            confidence = det['confidence']
+            
+            # Get color for this class
+            color = config.get_class_color(class_idx)
+            
+            # Draw rectangle
+            cv2.rectangle(frame, (x1, y1), (x2, y2), color, config.BBOX_THICKNESS)
+            
+            # Prepare label text
+            label = f"{class_name}: {confidence:.2f}"
+            
+            # Get text size for background rectangle
+            (text_width, text_height), baseline = cv2.getTextSize(
+                label, 
+                cv2.FONT_HERSHEY_SIMPLEX, 
+                config.FONT_SCALE, 
+                1
+            )
+            
+            # Draw label background (filled rectangle)
+            label_y = y1 - 10 if y1 > text_height + 10 else y2 + text_height + 10
+            cv2.rectangle(
+                frame,
+                (x1, label_y - text_height - baseline),
+                (x1 + text_width, label_y + baseline),
+                color,
+                -1  # Filled
+            )
+            
+            # Draw label text
+            cv2.putText(
+                frame,
+                label,
+                (x1, label_y - baseline),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                config.FONT_SCALE,
+                (255, 255, 255),  # White text
+                1,
+                cv2.LINE_AA
+            )
+        
+        return frame
 
     def close(self):
         try:

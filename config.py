@@ -126,3 +126,23 @@ CLASS_NAMES = {
 
 def get_class_name(index: int) -> str:
     return CLASS_NAMES.get(index, f"unknown_{index}")
+
+DRAW_BBOXES = True  # Enable/disable bounding box drawing
+BBOX_THICKNESS = 2  # Thickness of bounding box lines
+FONT_SCALE = 0.5    # Size of label text
+NMS_IOU_THRESHOLD = 0.5  # IoU threshold for Non-Maximum Suppression
+
+# Color scheme for each class (BGR format for OpenCV)
+CLASS_COLORS = {
+    0: (0, 0, 255),      # Crown Rot Disease - Red
+    1: (0, 165, 255),    # Fruit Fasciation Disorder - Orange
+    2: (0, 0, 139),      # Fruit Rot Disease - Dark Red
+    3: (0, 255, 0),      # Healthy - Green
+    4: (255, 0, 255),    # Mealybug Wilt Disease - Magenta
+    5: (255, 255, 0),    # Multiple Crown Disorder - Cyan
+    6: (128, 0, 128)     # Root Rot Disease - Purple
+}
+
+def get_class_color(index: int):
+    """Get color for a specific class index"""
+    return CLASS_COLORS.get(index, (255, 255, 255))  # Default: white

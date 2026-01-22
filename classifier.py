@@ -232,6 +232,67 @@ class PinyaSuriAI:
         
         return iou
 
+    def draw_bounding_boxes(self, frame, detections):
+        """
+        Draw bounding boxes and labels on frame (public method for testing)
+        
+        Args:
+            frame: OpenCV BGR image
+            detections: List of detection dictionaries
+            
+        Returns:
+            Frame with bounding boxes drawn
+        """
+        for det in detections:
+            # Get bounding box in pixels
+            x1, y1, x2, y2 = det['bbox_pixels']
+            
+            # Get class info
+            class_idx = det['class_index']
+            class_name = det['class_name']
+            confidence = det['confidence']
+            
+            # Get color for this class
+            color = config.get_class_color(class_idx)
+            
+            # Draw rectangle
+            cv2.rectangle(frame, (x1, y1), (x2, y2), color, config.BBOX_THICKNESS)
+            
+            # Prepare label text
+            label = f"{class_name}: {confidence:.2f}"
+            
+            # Get text size for background rectangle
+            (text_width, text_height), baseline = cv2.getTextSize(
+                label, 
+                cv2.FONT_HERSHEY_SIMPLEX, 
+                config.FONT_SCALE, 
+                1
+            )
+            
+            # Draw label background (filled rectangle)
+            label_y = y1 - 10 if y1 > text_height + 10 else y2 + text_height + 10
+            cv2.rectangle(
+                frame,
+                (x1, label_y - text_height - baseline),
+                (x1 + text_width, label_y + baseline),
+                color,
+                -1  # Filled
+            )
+            
+            # Draw label text
+            cv2.putText(
+                frame,
+                label,
+                (x1, label_y - baseline),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                config.FONT_SCALE,
+                (255, 255, 255),  # White text
+                1,
+                cv2.LINE_AA
+            )
+        
+        return frame
+
     def get_detection_summary(self, detections):
         """Get summary statistics from detections"""
         if not detections:
