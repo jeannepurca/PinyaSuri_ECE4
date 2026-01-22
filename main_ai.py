@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# main.py - DEBUGGING VERSION
+# main_ai.py
 
 import time
 import csv
@@ -252,7 +252,6 @@ def get_telemetry_dict(pixhawk):
         "lat": pixhawk.position["lat"],
         "lon": pixhawk.position["lon"],
         "imu_accel": pixhawk.imu_accel,
-        "battery_remaining": pixhawk.battery_remaining
     }
 
 def handle_arm_state_change(pixhawk, metrics, was_armed, flight_number, captured_wp, logger):
