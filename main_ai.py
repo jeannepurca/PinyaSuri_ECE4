@@ -76,7 +76,7 @@ def log_image_capture(flight_id, flight_number, waypoint, position, burst_id, bu
 
 def log_detection_results(flight_id, flight_number, waypoint, burst_id, burst_index, image_path, detections, logger):
     """Log AI detection results to CSV"""
-    try:        
+    try:
         detection_count = len(detections)
         detections_json = json.dumps([{
             'class': d['class_name'],
@@ -97,6 +97,9 @@ def log_detection_results(flight_id, flight_number, waypoint, burst_id, burst_in
                 detection_count,
                 detections_json
             ])
+        
+        uploader.add_detection_to_flight(flight_id, waypoint, image_path, detections)
+        
     except Exception as e:
         logger.error(f"Failed to log detection results: {e}")
 
@@ -451,6 +454,13 @@ def cleanup(camera, pixhawk, metrics, was_armed, logger):
     if was_armed:
         logger.info(">>> Finalizing flight metrics...")
         metrics.end_flight()
+        
+        # Generate flight summary JSON
+        total_waypoints = pixhawk.get_last_waypoint() if pixhawk else 0
+        logger.info(">>> Generating flight summary...")
+        summary_path = uploader.finalize_flight_summary(metrics.flight_id, total_waypoints)
+        if summary_path:
+            logger.info(f"✓ Flight summary created: {summary_path}")
 
     # Cleanup camera
     try:
@@ -465,7 +475,8 @@ def cleanup(camera, pixhawk, metrics, was_armed, logger):
             logger.info("✓ Pixhawk connection closed.")
     except Exception as e:
         logger.warning(f"⚠ Error closing Pixhawk: {e} ⚠")
-    
+
+    uploader.stop_upload_queue()
     logger.info("✓ Shutdown complete.")
 
 def main():
@@ -474,6 +485,7 @@ def main():
     logger = setup_logging()
     logger.setLevel(logging.INFO)
     
+    uploader.start_upload_queue()
     pixhawk = Pixhawk()
     camera = Camera()
 
