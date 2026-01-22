@@ -6,8 +6,9 @@ import csv
 import logging
 import sys
 from pathlib import Path
-import config
 import json
+import config
+import uploader
 from logging_config import setup_logging
 from pixhawk import Pixhawk
 from camera import Camera
@@ -75,9 +76,7 @@ def log_image_capture(flight_id, flight_number, waypoint, position, burst_id, bu
 
 def log_detection_results(flight_id, flight_number, waypoint, burst_id, burst_index, image_path, detections, logger):
     """Log AI detection results to CSV"""
-    try:
-        import json
-        
+    try:        
         detection_count = len(detections)
         detections_json = json.dumps([{
             'class': d['class_name'],
