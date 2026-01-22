@@ -65,14 +65,7 @@ class PinyaSuriAI:
         """
         Detect multiple pineapples in a frame
         
-        Returns: List of detections, each containing:
-            {
-                'class_index': int,
-                'class_name': str,
-                'confidence': float,
-                'bbox': (x1, y1, x2, y2),  # normalized [0-1]
-                'bbox_pixels': (x1, y1, x2, y2)  # actual pixels
-            }
+        Returns: List of detections
         """
         try:
             frame_height, frame_width = frame.shape[:2]
@@ -86,17 +79,29 @@ class PinyaSuriAI:
             self.interpreter.set_tensor(self.input_details[0]['index'], input_data)
             self.interpreter.invoke()
             
-            # Get outputs
-            # For TFLite object detection models, typical outputs are:
-            # output[0]: bounding boxes (normalized coordinates)
-            # output[1]: class indices
-            # output[2]: confidence scores
-            # output[3]: number of detections
+            # ✅ ADD THIS: Check number of outputs
+            if len(self.output_details) < 4:
+                logger.error(f"⚠ Model has only {len(self.output_details)} outputs, expected 4")
+                return []
             
-            boxes = self.interpreter.get_tensor(self.output_details[0]['index'])[0]  # [N, 4]
-            classes = self.interpreter.get_tensor(self.output_details[1]['index'])[0]  # [N]
-            scores = self.interpreter.get_tensor(self.output_details[2]['index'])[0]  # [N]
-            num_detections = int(self.interpreter.get_tensor(self.output_details[3]['index'])[0])
+            # Get outputs with error handling
+            try:
+                boxes = self.interpreter.get_tensor(self.output_details[0]['index'])[0]
+                classes = self.interpreter.get_tensor(self.output_details[1]['index'])[0]
+                scores = self.interpreter.get_tensor(self.output_details[2]['index'])[0]
+                num_detections = int(self.interpreter.get_tensor(self.output_details[3]['index'])[0])
+            except IndexError as e:
+                logger.error(f"⚠ Failed to extract model outputs: {e}")
+                logger.error(f"   Output shapes: {[o['shape'] for o in self.output_details]}")
+                return []
+            
+            # ✅ ADD THIS: Validate num_detections
+            if num_detections == 0:
+                logger.debug("No detections in frame")
+                return []
+            
+            # ✅ ADD THIS: Ensure we don't exceed array bounds
+            num_detections = min(num_detections, len(boxes), len(classes), len(scores))
             
             detections = []
             
@@ -135,8 +140,10 @@ class PinyaSuriAI:
             
         except Exception as e:
             logger.error(f"⚠ Detection failed: {e}")
+            import traceback
+            logger.error(traceback.format_exc())  # ✅ ADD THIS for full error details
             return []
-
+    
     def detect_with_nms(self, frame, iou_threshold=0.5):
         """
         Detect with Non-Maximum Suppression to remove overlapping boxes
