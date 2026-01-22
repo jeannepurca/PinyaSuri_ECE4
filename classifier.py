@@ -4,6 +4,7 @@
 import logging
 import numpy as np
 import cv2
+import json
 import config
 
 logger = logging.getLogger(__name__)
@@ -29,9 +30,20 @@ class PinyaSuriAI:
             self.input_height = self.input_shape[1]
             self.input_width = self.input_shape[2]
             
+            # Try to load class names from model metadata
+            self.class_names = self._load_class_names_from_model()
+            
+            if self.class_names:
+                logger.info(f"✓ Loaded {len(self.class_names)} class names from model metadata")
+                for idx, name in self.class_names.items():
+                    logger.info(f"  Class {idx}: {name}")
+            else:
+                logger.warning("⚠ No class names in model metadata, using defaults from config")
+                self.class_names = config.DEFAULT_CLASS_NAMES
+            
             logger.info(f"✓ Object Detection Model loaded: {config.MODEL_PATH.name}")
             logger.info(f"  Input shape: {self.input_shape}")
-            logger.info(f"  Number of classes: {len(config.CLASS_NAMES)}")
+            logger.info(f"  Number of classes: {len(self.class_names)}")
             logger.info(f"  Detection threshold: {config.DETECTION_THRESHOLD}")
             
         except ImportError:
@@ -42,6 +54,51 @@ class PinyaSuriAI:
         except Exception as e:
             logger.error(f"⚠ Failed to load detection model: {e}")
             raise
+
+    def _load_class_names_from_model(self):
+        """
+        Try to extract class names from TFLite model metadata
+        
+        Returns:
+            dict: Class index to name mapping, or None if not available
+        """
+        try:
+            # Get model metadata
+            metadata = self.interpreter._get_full_signature_list()
+            
+            # TFLite models may store class names in different ways
+            # This is a common approach for YOLOv8 models
+            
+            # Method 1: Check for metadata in the model file
+            model_path = config.MODEL_PATH
+            
+            # Try to read associated metadata files
+            metadata_json = model_path.parent / f"{model_path.stem}_metadata.json"
+            labels_txt = model_path.parent / f"{model_path.stem}_labels.txt"
+            
+            # Try JSON metadata file
+            if metadata_json.exists():
+                with open(metadata_json, 'r') as f:
+                    metadata = json.load(f)
+                    if 'class_names' in metadata:
+                        return {i: name for i, name in enumerate(metadata['class_names'])}
+            
+            # Try labels.txt file
+            if labels_txt.exists():
+                with open(labels_txt, 'r') as f:
+                    labels = [line.strip() for line in f.readlines()]
+                    return {i: name for i, name in enumerate(labels)}
+            
+            # If no external metadata found, return None
+            return None
+            
+        except Exception as e:
+            logger.debug(f"Could not load class names from model metadata: {e}")
+            return None
+
+    def get_class_name(self, index: int) -> str:
+        """Get class name for a given index"""
+        return config.get_class_name(index, self.class_names)
 
     def preprocess_frame(self, frame):
         """Preprocess frame for YOLOv8 input"""
@@ -116,7 +173,8 @@ class PinyaSuriAI:
                 if confidence < config.DETECTION_THRESHOLD:
                     continue
                 
-                class_name = config.get_class_name(class_idx)
+                # Use the class name from the model's mapping
+                class_name = self.get_class_name(class_idx)
                 
                 # YOLOv8 coordinates are already normalized [0, 1] relative to input size
                 # Convert from center format to corner format
