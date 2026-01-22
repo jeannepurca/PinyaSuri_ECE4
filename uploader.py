@@ -13,7 +13,7 @@ import config
 import csv
 from collections import defaultdict
 
-logger = logging.getLogger("JSONUploader")
+logger = logging.getLogger(__name__)
 
 # ============================================================================
 # FLIGHT DATA AGGREGATOR
