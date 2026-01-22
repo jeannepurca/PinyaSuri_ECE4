@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# test_detection.py - Test classifier and camera without flying
+# ai_test.py - Test classifier and camera without flying
 
 import logging
 import sys
@@ -28,13 +28,13 @@ class DetectionTester:
         logger.info("=" * 60)
         
         try:
-            # Initialize camera
-            logger.info("Initializing camera...")
-            self.camera = Camera()
-            
-            # Initialize AI classifier
+            # Initialize AI classifier first
             logger.info("Loading AI model...")
             self.classifier = PinyaSuriAI()
+            
+            # Initialize camera with classifier reference
+            logger.info("Initializing camera...")
+            self.camera = Camera(classifier=self.classifier)
             
             # Test counter
             self.test_count = 0

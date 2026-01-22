@@ -10,8 +10,15 @@ import cv2
 logger = logging.getLogger(__name__)
 
 class Camera:
-    def __init__(self):
+    def __init__(self, classifier=None):
+        """
+        Initialize camera
+        
+        Args:
+            classifier: Optional PinyaSuriAI instance for drawing bounding boxes
+        """
         config.ensure_directories()
+        self.classifier = classifier
 
         try:
             from picamera2 import Picamera2
@@ -31,6 +38,10 @@ class Camera:
         except Exception as e:
             logger.error(f"⚠ Failed to initialize camera: {e} ⚠")
             raise
+
+    def set_classifier(self, classifier):
+        """Set the classifier instance for bounding box drawing"""
+        self.classifier = classifier
 
     def capture(self, waypoint: int, flight_number: int = 1, prefix="img", burst_index=0):
         """Capture image and save to today's date folder"""
@@ -77,6 +88,9 @@ class Camera:
                 logger.error(f"⚠ Failed to load image: {image_path}")
                 return None
 
+            logger.debug(f"Loaded image shape: {frame.shape}")
+            logger.debug(f"Number of detections: {len(detections)}")
+
             # Get today's folder
             date_folder = config.get_image_day_dir()
 
@@ -89,20 +103,40 @@ class Camera:
 
             # Draw bounding boxes if enabled and detections exist
             if config.DRAW_BBOXES and detections:
-                frame = self._draw_bounding_boxes(frame, detections)
+                logger.debug(f"Drawing {len(detections)} bounding boxes...")
+                
+                # Use classifier's draw_bounding_boxes method if available
+                if self.classifier is not None:
+                    frame = self.classifier.draw_bounding_boxes(frame, detections)
+                else:
+                    # Fallback to internal method
+                    frame = self._draw_bounding_boxes(frame, detections)
+                
+                logger.debug("✓ Bounding boxes drawn")
+            elif not config.DRAW_BBOXES:
+                logger.debug("Bounding box drawing disabled in config")
+            elif not detections:
+                logger.debug("No detections to draw")
             
             # Save image
-            cv2.imwrite(str(fullpath), frame)
-            logger.debug(f"✓ Saved detection image: {filename}")
-            return str(fullpath)
+            success = cv2.imwrite(str(fullpath), frame)
+            
+            if success:
+                logger.debug(f"✓ Saved detection image: {filename}")
+                return str(fullpath)
+            else:
+                logger.error(f"⚠ cv2.imwrite failed for: {filename}")
+                return None
             
         except Exception as e:
             logger.error(f"⚠ Failed to save detection image: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return None
 
     def _draw_bounding_boxes(self, frame, detections):
         """
-        Draw bounding boxes and labels on frame
+        Draw bounding boxes and labels on frame (fallback method)
         
         Args:
             frame: OpenCV BGR image
