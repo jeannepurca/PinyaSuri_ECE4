@@ -119,8 +119,9 @@ CLASS_NAMES = {
     1: "Mealybug Wilt Disease",
     2: "Root Rot Disease",
     3: "Crown Rot Disease",
-    4: "Fruit Fasciation Disorder",
-    5: "Multiple Crown Disorder"
+    4: "Fruit Rot Disease",
+    5: "Fruit Fasciation Disorder",
+    6: "Multiple Crown Disorder"
 }
 
 def get_class_name(index: int) -> str:
