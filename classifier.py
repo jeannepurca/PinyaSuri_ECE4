@@ -44,15 +44,19 @@ class PinyaSuriAI:
             raise
 
     def preprocess_frame(self, frame):
-        """Preprocess frame for model input"""
+        """Preprocess frame for YOLOv8 input"""
         try:
-            # Resize to model input size
-            resized = cv2.resize(frame, (self.input_width, self.input_height))
+            # YOLOv8 expects RGB (OpenCV loads as BGR)
+            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             
-            # Normalize pixel values to [0, 1]
+            # Resize to model input size
+            resized = cv2.resize(rgb_frame, (self.input_width, self.input_height))
+            
+            # YOLOv8 expects uint8 [0-255] or float32 [0-255]
+            # Normalize to [0, 1] and convert to float32
             normalized = resized.astype(np.float32) / 255.0
             
-            # Add batch dimension
+            # Add batch dimension: [1, height, width, 3]
             input_data = np.expand_dims(normalized, axis=0)
             
             return input_data
@@ -60,10 +64,10 @@ class PinyaSuriAI:
         except Exception as e:
             logger.error(f"⚠ Preprocessing failed: {e}")
             return None
-
+    
     def detect(self, frame):
         """
-        Detect multiple pineapples in a frame
+        Detect multiple pineapples in a frame (YOLOv8 format)
         
         Returns: List of detections
         """
@@ -79,44 +83,53 @@ class PinyaSuriAI:
             self.interpreter.set_tensor(self.input_details[0]['index'], input_data)
             self.interpreter.invoke()
             
-            # ✅ ADD THIS: Check number of outputs
-            if len(self.output_details) < 4:
-                logger.error(f"⚠ Model has only {len(self.output_details)} outputs, expected 4")
-                return []
+            # YOLOv8 has 1 output tensor
+            output_data = self.interpreter.get_tensor(self.output_details[0]['index'])
             
-            # Get outputs with error handling
-            try:
-                boxes = self.interpreter.get_tensor(self.output_details[0]['index'])[0]
-                classes = self.interpreter.get_tensor(self.output_details[1]['index'])[0]
-                scores = self.interpreter.get_tensor(self.output_details[2]['index'])[0]
-                num_detections = int(self.interpreter.get_tensor(self.output_details[3]['index'])[0])
-            except IndexError as e:
-                logger.error(f"⚠ Failed to extract model outputs: {e}")
-                logger.error(f"   Output shapes: {[o['shape'] for o in self.output_details]}")
-                return []
+            # YOLOv8 output shape: [1, num_features, num_boxes]
+            # For single class: [1, 5, 8400] where 5 = [x, y, w, h, class_conf]
+            # For COCO (80 classes): [1, 84, 8400] where 84 = [x, y, w, h, class1...class80]
             
-            # ✅ ADD THIS: Validate num_detections
-            if num_detections == 0:
-                logger.debug("No detections in frame")
-                return []
+            logger.debug(f"YOLOv8 output shape: {output_data.shape}")
             
-            # ✅ ADD THIS: Ensure we don't exceed array bounds
-            num_detections = min(num_detections, len(boxes), len(classes), len(scores))
+            # Transpose to [num_boxes, num_features]
+            predictions = output_data[0].T  # Shape: [8400, 5] or [8400, 84]
             
             detections = []
             
-            for i in range(num_detections):
-                score = float(scores[i])
+            for pred in predictions:
+                # YOLOv8 format: [x_center, y_center, width, height, class_scores...]
+                x_center, y_center, width, height = pred[:4]
+                
+                # Get class confidence
+                if len(pred) == 5:
+                    # Single class model
+                    confidence = float(pred[4])
+                    class_idx = 0
+                else:
+                    # Multi-class model
+                    class_scores = pred[4:]
+                    class_idx = int(np.argmax(class_scores))
+                    confidence = float(class_scores[class_idx])
                 
                 # Filter by confidence threshold
-                if score < config.DETECTION_THRESHOLD:
+                if confidence < config.DETECTION_THRESHOLD:
                     continue
                 
-                class_idx = int(classes[i])
                 class_name = config.get_class_name(class_idx)
                 
-                # Bounding box (normalized coordinates: ymin, xmin, ymax, xmax)
-                ymin, xmin, ymax, xmax = boxes[i]
+                # YOLOv8 coordinates are already normalized [0, 1] relative to input size
+                # Convert from center format to corner format
+                xmin = (x_center - width / 2) / self.input_width
+                ymin = (y_center - height / 2) / self.input_height
+                xmax = (x_center + width / 2) / self.input_width
+                ymax = (y_center + height / 2) / self.input_height
+                
+                # Clamp to [0, 1]
+                xmin = max(0.0, min(1.0, xmin))
+                ymin = max(0.0, min(1.0, ymin))
+                xmax = max(0.0, min(1.0, xmax))
+                ymax = max(0.0, min(1.0, ymax))
                 
                 # Convert to pixel coordinates
                 x1_px = int(xmin * frame_width)
@@ -127,7 +140,7 @@ class PinyaSuriAI:
                 detection = {
                     'class_index': class_idx,
                     'class_name': class_name,
-                    'confidence': score,
+                    'confidence': confidence,
                     'bbox': (xmin, ymin, xmax, ymax),  # normalized
                     'bbox_pixels': (x1_px, y1_px, x2_px, y2_px)  # pixels
                 }
@@ -141,9 +154,9 @@ class PinyaSuriAI:
         except Exception as e:
             logger.error(f"⚠ Detection failed: {e}")
             import traceback
-            logger.error(traceback.format_exc())  # ✅ ADD THIS for full error details
-            return []
-    
+            logger.error(traceback.format_exc())
+            return []    
+        
     def detect_with_nms(self, frame, iou_threshold=0.5):
         """
         Detect with Non-Maximum Suppression to remove overlapping boxes
