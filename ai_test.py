@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-# ai_test.py - Headless ENTER-to-capture AI test
+# ai_test.py - Headless ENTER-to-capture AI test (with class output)
 
 import time
 import logging
 from pathlib import Path
 import cv2
+from collections import Counter
 from classifier import PinyaSuriAI
 import config
 
@@ -36,7 +37,6 @@ OUTPUT_DIR.mkdir(exist_ok=True)
 def open_picamera2(width=640, height=480):
     if not PICAMERA2_AVAILABLE:
         return None
-
     try:
         logger.info("Trying Picamera2...")
         picam2 = Picamera2()
@@ -74,10 +74,8 @@ def main():
     logger.info("🍍 PINYASURI AI – PRESS ENTER TO CAPTURE")
     logger.info("=" * 60)
 
-    # Load classifier
     classifier = PinyaSuriAI()
 
-    # Open camera
     picam2 = open_picamera2()
     cap = None
 
@@ -110,7 +108,6 @@ def main():
                     break
 
             frame_count += 1
-
             logger.info(f"📷 Capturing frame {frame_count}...")
 
             # Run detection
@@ -121,17 +118,40 @@ def main():
             )
             infer_time = time.time() - t0
 
-            # Draw bounding boxes
+            # ----------------------------
+            # Detection output
+            # ----------------------------
             if detections:
+                logger.info(f"🔍 Detections found: {len(detections)}")
+
+                class_list = []
+                for det in detections:
+                    class_name = det["class_name"]
+                    conf = det["confidence"]
+                    class_list.append(class_name)
+                    logger.info(f"   - {class_name} (conf: {conf:.2f})")
+
+                # Class summary
+                class_counts = Counter(class_list)
+                logger.info("📊 Class summary:")
+                for cls, cnt in class_counts.items():
+                    logger.info(f"   {cls}: {cnt}")
+
+                # Draw boxes
                 frame = classifier.draw_bounding_boxes(frame, detections)
 
+                # Build filename suffix
+                suffix = "_".join(f"{cls}x{cnt}" for cls, cnt in class_counts.items())
+            else:
+                logger.info("ℹ️ No detections")
+                suffix = "no_detection"
+
             # Save image
-            output_path = OUTPUT_DIR / f"capture_{frame_count:04d}.jpg"
+            output_path = OUTPUT_DIR / f"capture_{frame_count:04d}_{suffix}.jpg"
             cv2.imwrite(str(output_path), frame)
 
             logger.info(
                 f"✓ Saved {output_path.name} | "
-                f"Detections: {len(detections)} | "
                 f"Inference: {infer_time*1000:.1f} ms"
             )
             logger.info("👉 Press ENTER to capture again")
@@ -144,7 +164,6 @@ def main():
             picam2.stop()
         if cap:
             cap.release()
-
         logger.info("Camera closed")
 
 
