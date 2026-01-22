@@ -1,63 +1,223 @@
 #!/usr/bin/env python3
-# capture_detect.py - capture image and run PinyaSuriAI detection
+# test_detection.py - Test classifier and camera without flying
 
-import cv2
 import logging
+import sys
+import cv2
+from datetime import datetime
+from pathlib import Path
+
+# Import your existing modules
 import config
+from camera import Camera
 from classifier import PinyaSuriAI
 
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
+
+
+class DetectionTester:
+    def __init__(self):
+        """Initialize camera and AI classifier"""
+        logger.info("=" * 60)
+        logger.info("PINEAPPLE DETECTION TESTING SYSTEM")
+        logger.info("=" * 60)
+        
+        try:
+            # Initialize camera
+            logger.info("Initializing camera...")
+            self.camera = Camera()
+            
+            # Initialize AI classifier
+            logger.info("Loading AI model...")
+            self.classifier = PinyaSuriAI()
+            
+            # Test counter
+            self.test_count = 0
+            
+            logger.info("✓ System ready!")
+            logger.info("")
+            
+        except Exception as e:
+            logger.error(f"⚠ Initialization failed: {e}")
+            raise
+    
+    def run_test(self):
+        """Capture image and run detection"""
+        self.test_count += 1
+        
+        logger.info("=" * 60)
+        logger.info(f"TEST #{self.test_count}")
+        logger.info("=" * 60)
+        
+        try:
+            # 1. Capture image
+            logger.info("📷 Capturing image...")
+            image_path = self.camera.capture(
+                waypoint=999,  # Test waypoint
+                flight_number=0,  # Test flight
+                prefix="test",
+                burst_index=self.test_count
+            )
+            logger.info(f"✓ Image captured: {image_path}")
+            
+            # 2. Load image for detection
+            logger.info("🔍 Loading image for detection...")
+            frame = cv2.imread(image_path)
+            
+            if frame is None:
+                logger.error("⚠ Failed to load captured image!")
+                return
+            
+            logger.info(f"✓ Image loaded: {frame.shape[1]}x{frame.shape[0]} pixels")
+            
+            # 3. Run detection with NMS
+            logger.info("🤖 Running AI detection...")
+            detections = self.classifier.detect_with_nms(
+                frame, 
+                iou_threshold=config.NMS_IOU_THRESHOLD
+            )
+            
+            # 4. Display results
+            self._display_results(detections)
+            
+            # 5. Save detection image with bounding boxes
+            if detections:
+                logger.info("💾 Saving detection image with bounding boxes...")
+                detection_image_path = self.camera.save_detection_image(
+                    image_path=image_path,
+                    detections=detections,
+                    waypoint=999,
+                    flight_number=0,
+                    prefix="test_detection",
+                    burst_index=self.test_count
+                )
+                
+                if detection_image_path:
+                    logger.info(f"✓ Detection image saved: {detection_image_path}")
+            else:
+                logger.info("ℹ No detections to save")
+            
+            logger.info("")
+            logger.info("Test completed successfully!")
+            logger.info("")
+            
+        except Exception as e:
+            logger.error(f"⚠ Test failed: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+    
+    def _display_results(self, detections):
+        """Display detection results in a formatted way"""
+        logger.info("")
+        logger.info("=" * 60)
+        logger.info("DETECTION RESULTS")
+        logger.info("=" * 60)
+        
+        if not detections:
+            logger.info("❌ No pineapples detected")
+            logger.info("=" * 60)
+            return
+        
+        # Get summary
+        summary = self.classifier.get_detection_summary(detections)
+        
+        logger.info(f"✓ Total detections: {summary['total_count']}")
+        logger.info(f"✓ Average confidence: {summary['avg_confidence']:.2%}")
+        logger.info("")
+        
+        # Class breakdown
+        logger.info("Class Breakdown:")
+        for class_name, count in summary['class_counts'].items():
+            logger.info(f"  • {class_name}: {count}")
+        logger.info("")
+        
+        # Individual detections
+        logger.info("Individual Detections:")
+        logger.info("-" * 60)
+        
+        for i, det in enumerate(detections, 1):
+            class_name = det['class_name']
+            confidence = det['confidence']
+            bbox = det['bbox_pixels']
+            
+            logger.info(f"Detection #{i}:")
+            logger.info(f"  Class: {class_name}")
+            logger.info(f"  Confidence: {confidence:.2%}")
+            logger.info(f"  BBox (pixels): ({bbox[0]}, {bbox[1]}) to ({bbox[2]}, {bbox[3]})")
+            logger.info("")
+        
+        logger.info("=" * 60)
+        logger.info("")
+    
+    def interactive_mode(self):
+        """Run interactive testing mode"""
+        logger.info("=" * 60)
+        logger.info("INTERACTIVE MODE")
+        logger.info("=" * 60)
+        logger.info("Press ENTER to capture and detect")
+        logger.info("Type 'q' or 'quit' to exit")
+        logger.info("=" * 60)
+        logger.info("")
+        
+        try:
+            while True:
+                user_input = input("Press ENTER to test (or 'q' to quit): ").strip().lower()
+                
+                if user_input in ['q', 'quit', 'exit']:
+                    logger.info("Exiting...")
+                    break
+                
+                # Run test on Enter
+                self.run_test()
+                
+        except KeyboardInterrupt:
+            logger.info("\nInterrupted by user")
+        
+        finally:
+            self.cleanup()
+    
+    def cleanup(self):
+        """Clean up resources"""
+        logger.info("")
+        logger.info("=" * 60)
+        logger.info("CLEANUP")
+        logger.info("=" * 60)
+        
+        try:
+            self.camera.close()
+            logger.info("✓ Camera closed")
+        except Exception as e:
+            logger.warning(f"⚠ Error during cleanup: {e}")
+        
+        logger.info("")
+        logger.info(f"Total tests run: {self.test_count}")
+        logger.info("Goodbye!")
+        logger.info("=" * 60)
+
 
 def main():
-    # Initialize AI detector
-    ai = PinyaSuriAI()
+    """Main entry point"""
+    try:
+        # Ensure directories exist
+        config.ensure_directories()
+        
+        # Create tester
+        tester = DetectionTester()
+        
+        # Run interactive mode
+        tester.interactive_mode()
+        
+    except Exception as e:
+        logger.error(f"⚠ Fatal error: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        sys.exit(1)
 
-    # Open default camera
-    cap = cv2.VideoCapture(0)  # change index if you have multiple cameras
-    if not cap.isOpened():
-        logger.error("Cannot open camera")
-        return
-
-    logger.info("Camera opened. Press 'Enter' to capture an image...")
-
-    while True:
-        # Read a frame
-        ret, frame = cap.read()
-        if not ret:
-            logger.error("Failed to read frame from camera")
-            break
-
-        # Show live preview (optional)
-        cv2.imshow("Camera Preview", frame)
-        key = cv2.waitKey(1)
-
-        # Capture on Enter key
-        if key == 13:  # Enter key
-            logger.info("Capturing image...")
-            detections = ai.detect_with_nms(frame)
-
-            # Draw bounding boxes
-            frame_with_boxes = ai.draw_bounding_boxes(frame.copy(), detections)
-
-            # Save image
-            output_file = config.IMAGE_OUTPUT_DIR / "captured_detection.jpg"
-            cv2.imwrite(str(output_file), frame_with_boxes)
-            logger.info(f"Image saved to {output_file}")
-
-            # Print detection info
-            if detections:
-                logger.info("Detections:")
-                for det in detections:
-                    logger.info(f"  - {det['class_name']}: {det['confidence']:.2f}")
-            else:
-                logger.info("No objects detected.")
-
-            break  # exit after one capture
-
-    # Release resources
-    cap.release()
-    cv2.destroyAllWindows()
 
 if __name__ == "__main__":
     main()
