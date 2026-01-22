@@ -110,7 +110,7 @@ BURST_INTERVAL = 0.5  # Seconds between captures
 # ============================================================================  
 # AI CONFIGURATION  
 # ============================================================================  
-SERVER = "http://WEB_SERVER_IP:5000"
+SERVER = "https://finalfinaledit-pinyasuri-webdev.onrender.com/api/upload-flight-log"
 MODEL_PATH = MODEL_DIR / "YOLOv8n_PinyaSuri_AI.tflite"
 DETECTION_THRESHOLD = 0.5
 

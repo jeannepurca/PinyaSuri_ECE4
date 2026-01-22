@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# main_ai.py
+# main_ai.py - Integrated with uploader.py
 
 import time
 import csv
@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 import json
 import config
-import uploader
+import uploader  # ✅ Import uploader module
 from logging_config import setup_logging
 from pixhawk import Pixhawk
 from camera import Camera
@@ -75,7 +75,7 @@ def log_image_capture(flight_id, flight_number, waypoint, position, burst_id, bu
         logger.error(f"Failed to log image capture to CSV: {e}")
 
 def log_detection_results(flight_id, flight_number, waypoint, burst_id, burst_index, image_path, detections, logger):
-    """Log AI detection results to CSV"""
+    """Log AI detection results to CSV and uploader"""
     try:
         detection_count = len(detections)
         detections_json = json.dumps([{
@@ -84,6 +84,7 @@ def log_detection_results(flight_id, flight_number, waypoint, burst_id, burst_in
             'bbox': [round(x, 4) for x in d['bbox']]
         } for d in detections])
         
+        # Log to CSV
         with open(config.CLASSIFICATION_CSV, "a", newline="") as f:
             writer = csv.writer(f)
             writer.writerow([
@@ -98,6 +99,7 @@ def log_detection_results(flight_id, flight_number, waypoint, burst_id, burst_in
                 detections_json
             ])
         
+        # ✅ ADD DETECTION DATA TO FLIGHT AGGREGATOR
         uploader.add_detection_to_flight(flight_id, waypoint, image_path, detections)
         
     except Exception as e:
@@ -185,6 +187,9 @@ def handle_waypoint_capture(pixhawk, camera, classifier, metrics, waypoint, flig
                     logger
                 )
                 
+                # ✅ QUEUE IMAGE FOR UPLOAD
+                uploader.queue_image_upload(image_path)
+                
                 logger.info(f"  ✓ Frame {i+1}/{num_captures} captured "
                            f"(size: {Path(image_path).stat().st_size / 1024:.1f} KB)")
                 
@@ -211,8 +216,10 @@ def handle_waypoint_capture(pixhawk, camera, classifier, metrics, waypoint, flig
                         
                         if detection_image_path:
                             logger.info(f"  ✓ Detection image saved: {Path(detection_image_path).name}")
+                            # ✅ QUEUE DETECTION IMAGE FOR UPLOAD
+                            uploader.queue_image_upload(detection_image_path)
                         
-                        # Log results
+                        # Log results (this also adds to flight aggregator)
                         log_detection_results(
                             metrics.flight_id,
                             flight_number,
@@ -284,6 +291,14 @@ def handle_arm_state_change(pixhawk, metrics, was_armed, flight_number, captured
         # Just disarmed
         logger.info(f"🛬 FLIGHT #{flight_number} - DRONE DISARMED")
         metrics.end_flight()
+        
+        # ✅ GENERATE AND UPLOAD FLIGHT SUMMARY
+        total_waypoints = pixhawk.get_last_waypoint() if pixhawk else 0
+        logger.info(">>> Generating flight summary...")
+        summary_path = uploader.finalize_flight_summary(metrics.flight_id, total_waypoints)
+        if summary_path:
+            logger.info(f"✓ Flight summary created and queued: {summary_path}")
+        
         captured_wp.clear()
         pixhawk.clear_waypoint_log()
         
@@ -408,10 +423,8 @@ def main_loop(pixhawk, camera, classifier, metrics, logger):
         # PERIODIC DEBUG OUTPUT (every 2 seconds when armed)
         if pixhawk.armed and (time.time() - last_debug_time) > 2.0:
             last_debug_time = time.time()
-            # Show distance instead of reached log
             dist_str = f"{pixhawk.wp_dist:.2f}m" if pixhawk.wp_dist else "N/A"
             
-            # Check if position exists before accessing
             if pixhawk.position:
                 alt_str = f"{pixhawk.position['rel_alt']:.1f}m"
             else:
@@ -426,7 +439,7 @@ def main_loop(pixhawk, camera, classifier, metrics, logger):
         wp = pixhawk.current_waypoint or {"lat": None, "lon": None, "alt": None}
 
         # Update metrics during flight
-        if pixhawk.armed and pixhawk.position:  # ✅ FIX: Added position check
+        if pixhawk.armed and pixhawk.position:
             telemetry = {
                 "attitude": {
                     "roll": getattr(pixhawk, "roll", 0.0),
@@ -473,7 +486,7 @@ def cleanup(camera, pixhawk, metrics, was_armed, logger):
         logger.info(">>> Finalizing flight metrics...")
         metrics.end_flight()
         
-        # Generate flight summary JSON
+        # ✅ Generate flight summary JSON
         total_waypoints = pixhawk.get_last_waypoint() if pixhawk else 0
         logger.info(">>> Generating flight summary...")
         summary_path = uploader.finalize_flight_summary(metrics.flight_id, total_waypoints)
@@ -494,6 +507,7 @@ def cleanup(camera, pixhawk, metrics, was_armed, logger):
     except Exception as e:
         logger.warning(f"⚠ Error closing Pixhawk: {e} ⚠")
 
+    # ✅ STOP UPLOAD QUEUE AND PRINT STATS
     uploader.stop_upload_queue()
     logger.info("✓ Shutdown complete.")
 
@@ -503,13 +517,19 @@ def main():
     logger = setup_logging()
     logger.setLevel(logging.INFO)
     
+    # ✅ START UPLOAD QUEUE
     uploader.start_upload_queue()
+    
+    # ✅ SCAN FOR UNUPLOADED FILES FROM PREVIOUS RUNS
+    uploader.scan_and_queue_unuploaded_files()
+    
     pixhawk = Pixhawk()
     camera = Camera()
 
     logger.info(">>> Initializing AI detector...")
     try:
         classifier = PinyaSuriAI()
+        camera.set_classifier(classifier)  # Set classifier for camera
     except Exception as e:
         logger.error(f"⚠️ Failed to initialize AI detector: {e}")
         logger.error("   System will continue without AI detection")
