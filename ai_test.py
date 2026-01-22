@@ -9,6 +9,7 @@ import time
 import argparse
 from classifier import PinyaSuriAI
 import config
+import numpy as np
 
 # Setup logging
 logging.basicConfig(
@@ -17,6 +18,14 @@ logging.basicConfig(
     handlers=[logging.StreamHandler()]
 )
 logger = logging.getLogger(__name__)
+
+# Try to import picamera2
+try:
+    from picamera2 import Picamera2
+    PICAMERA2_AVAILABLE = True
+except ImportError:
+    PICAMERA2_AVAILABLE = False
+    logger.warning("picamera2 not available. Install with: sudo apt install -y python3-picamera2")
 
 
 class ClassifierTester:
@@ -174,9 +183,53 @@ class ClassifierTester:
         
         logger.info("=" * 60)
     
-    def _open_camera(self, camera_index=0):
+    def _open_picamera2(self, width=640, height=480):
         """
-        Try multiple methods to open the camera
+        Open Raspberry Pi Camera using picamera2
+        
+        Args:
+            width: Frame width
+            height: Frame height
+            
+        Returns:
+            Picamera2 object or None
+        """
+        if not PICAMERA2_AVAILABLE:
+            return None
+        
+        try:
+            logger.info("  Trying Picamera2...")
+            picam2 = Picamera2()
+            
+            # Configure camera
+            config = picam2.create_preview_configuration(
+                main={"size": (width, height), "format": "RGB888"}
+            )
+            picam2.configure(config)
+            
+            # Start camera
+            picam2.start()
+            
+            # Wait for camera to stabilize
+            time.sleep(1)
+            
+            # Test capture
+            test_frame = picam2.capture_array()
+            if test_frame is not None and test_frame.size > 0:
+                logger.info(f"  ✓ Picamera2 opened successfully ({width}x{height})")
+                return picam2
+            else:
+                logger.warning("  Picamera2 opened but failed to capture test frame")
+                picam2.stop()
+                return None
+                
+        except Exception as e:
+            logger.warning(f"  Picamera2 failed: {e}")
+            return None
+    
+    def _open_opencv_camera(self, camera_index=0):
+        """
+        Fallback to OpenCV camera opening (for USB webcams)
         
         Args:
             camera_index: Camera index to try
@@ -184,104 +237,11 @@ class ClassifierTester:
         Returns:
             cv2.VideoCapture object or None
         """
-        logger.info(f"Attempting to open camera {camera_index}...")
+        logger.info(f"  Trying OpenCV with camera index {camera_index}...")
         
-        # Method 1: Try V4L2 backend directly (best for Raspberry Pi)
-        logger.info("  Trying V4L2 backend...")
+        # Try V4L2 backend
         cap = cv2.VideoCapture(camera_index, cv2.CAP_V4L2)
         if cap.isOpened():
-            # Configure camera settings
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-            cap.set(cv2.CAP_PROP_FPS, 30)
-            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Reduce buffer to get fresh frames
-            
-            # Wait a moment for camera to initialize
-            time.sleep(0.5)
-            
-            # Try to read a test frame
-            for attempt in range(5):
-                ret, frame = cap.read()
-                if ret and frame is not None:
-                    logger.info("  ✓ Camera opened with V4L2 backend")
-                    return cap
-                time.sleep(0.2)
-            
-            logger.warning("  V4L2 backend opened but cannot read frames")
-        cap.release()
-        
-        # Method 2: Try default backend with lower resolution
-        logger.info("  Trying default backend with explicit MJPEG...")
-        cap = cv2.VideoCapture(camera_index)
-        if cap.isOpened():
-            # Try MJPEG format which is more compatible
-            cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'))
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-            cap.set(cv2.CAP_PROP_FPS, 30)
-            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-            
-            time.sleep(0.5)
-            
-            # Test if we can read a frame
-            for attempt in range(5):
-                ret, frame = cap.read()
-                if ret and frame is not None:
-                    logger.info("  ✓ Camera opened with default backend")
-                    return cap
-                time.sleep(0.2)
-            
-            logger.warning("  Default backend opened but cannot read frames")
-        cap.release()
-        
-        # Method 3: Try PiCamera if available (for older Raspberry Pi camera modules)
-        try:
-            logger.info("  Trying libcamera/PiCamera...")
-            # For newer Raspberry Pi OS with libcamera
-            import subprocess
-            result = subprocess.run(['libcamera-hello', '--list-cameras'], 
-                                   capture_output=True, timeout=2)
-            if result.returncode == 0:
-                logger.info("  libcamera detected, trying GStreamer pipeline...")
-                # Use GStreamer pipeline for libcamera
-                pipeline = (
-                    "libcamerasrc ! "
-                    "video/x-raw, width=640, height=480, framerate=30/1 ! "
-                    "videoconvert ! "
-                    "appsink"
-                )
-                cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
-                if cap.isOpened():
-                    logger.info("  ✓ Camera opened with libcamera pipeline")
-                    return cap
-                cap.release()
-        except Exception as e:
-            logger.debug(f"  libcamera not available: {e}")
-        
-        # Method 4: Try different camera indices
-        logger.info("  Trying different camera indices...")
-        for idx in [1, 2]:
-            logger.info(f"  Trying camera index {idx}...")
-            cap = cv2.VideoCapture(idx, cv2.CAP_V4L2)
-            if cap.isOpened():
-                cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-                time.sleep(0.5)
-                
-                for attempt in range(5):
-                    ret, frame = cap.read()
-                    if ret and frame is not None:
-                        logger.info(f"  ✓ Camera opened at index {idx}")
-                        return cap
-                    time.sleep(0.2)
-            cap.release()
-        
-        # Method 5: Try with YUYV format (more compatible)
-        logger.info("  Trying V4L2 with YUYV format...")
-        cap = cv2.VideoCapture(camera_index, cv2.CAP_V4L2)
-        if cap.isOpened():
-            cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('Y', 'U', 'Y', 'V'))
             cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
             cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
             cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
@@ -290,79 +250,96 @@ class ClassifierTester:
             for attempt in range(5):
                 ret, frame = cap.read()
                 if ret and frame is not None:
-                    logger.info("  ✓ Camera opened with YUYV format")
+                    logger.info("  ✓ OpenCV camera opened successfully")
                     return cap
                 time.sleep(0.2)
-        cap.release()
         
-        logger.error("  ✗ Failed to open camera with all methods")
+        cap.release()
         return None
     
-    def test_video_stream(self, video_path=None, camera_index=0):
+    def test_video_stream(self, video_path=None, camera_index=0, use_picamera=True):
         """
         Test classifier on video stream or camera feed
         
         Args:
             video_path: Path to video file (None for camera)
             camera_index: Camera index if using camera
+            use_picamera: Try picamera2 first for Pi Camera
         """
+        picam2 = None
+        cap = None
+        
         if video_path:
+            # Open video file
             cap = cv2.VideoCapture(str(video_path))
             source_name = Path(video_path).name
             
             if not cap.isOpened():
                 logger.error(f"⚠ Failed to open video file: {source_name}")
                 return
-        else:
-            cap = self._open_camera(camera_index)
-            source_name = f"Camera {camera_index}"
             
-            if cap is None:
+            logger.info("=" * 60)
+            logger.info(f"🎥 Testing video file: {source_name}")
+        else:
+            # Open camera
+            logger.info("=" * 60)
+            logger.info("🎥 Attempting to open camera...")
+            logger.info("=" * 60)
+            
+            # Try picamera2 first
+            if use_picamera and PICAMERA2_AVAILABLE:
+                picam2 = self._open_picamera2()
+            
+            # Fallback to OpenCV
+            if picam2 is None:
+                cap = self._open_opencv_camera(camera_index)
+            
+            if picam2 is None and cap is None:
                 logger.error("\n" + "=" * 60)
-                logger.error("CAMERA TROUBLESHOOTING TIPS:")
+                logger.error("CAMERA TROUBLESHOOTING:")
                 logger.error("=" * 60)
-                logger.error("1. Check if camera is connected:")
-                logger.error("   ls /dev/video*")
+                logger.error("For Raspberry Pi Camera:")
+                logger.error("  1. Install picamera2:")
+                logger.error("     sudo apt install -y python3-picamera2")
+                logger.error("  2. Enable camera interface:")
+                logger.error("     sudo raspi-config → Interface Options → Camera")
+                logger.error("  3. Check cable connection")
                 logger.error("")
-                logger.error("2. Check camera permissions:")
-                logger.error("   sudo usermod -a -G video $USER")
-                logger.error("   (logout and login again)")
-                logger.error("")
-                logger.error("3. Check if camera is in use:")
-                logger.error("   sudo fuser /dev/video0")
-                logger.error("")
-                logger.error("4. Test camera directly:")
-                logger.error("   v4l2-ctl --list-devices")
-                logger.error("   v4l2-ctl -d /dev/video0 --list-formats-ext")
-                logger.error("   raspistill -o test.jpg  (for Pi Camera)")
-                logger.error("   libcamera-hello  (for newer Pi OS)")
-                logger.error("")
-                logger.error("5. Try increasing GPU memory (for Pi):")
-                logger.error("   sudo raspi-config → Performance → GPU Memory → 128")
-                logger.error("")
-                logger.error("6. Disable other camera applications:")
-                logger.error("   sudo killall libcamera-hello")
-                logger.error("   sudo killall rpicam-hello")
+                logger.error("For USB Webcam:")
+                logger.error("  1. Check device: ls /dev/video*")
+                logger.error("  2. Check permissions: sudo usermod -a -G video $USER")
+                logger.error("  3. Increase GPU memory: sudo raspi-config → GPU Memory → 128")
                 logger.error("=" * 60)
                 return
+            
+            source_name = "Raspberry Pi Camera" if picam2 else f"Camera {camera_index}"
         
         logger.info("=" * 60)
-        logger.info(f"🎥 Testing video stream: {source_name}")
+        logger.info(f"📹 Testing video stream: {source_name}")
         logger.info("Press 'q' to quit, 's' to save current frame")
         logger.info("=" * 60)
-        
-        # Get actual resolution
-        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        logger.info(f"Resolution: {width}x{height}")
         
         frame_count = 0
         total_inference_time = 0
         
         try:
             while True:
-                ret, frame = cap.read()
-                if not ret:
+                # Capture frame
+                if picam2:
+                    # Using picamera2
+                    try:
+                        frame = picam2.capture_array()
+                        # picamera2 returns RGB, convert to BGR for OpenCV
+                        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+                        ret = True
+                    except Exception as e:
+                        logger.error(f"Failed to capture frame: {e}")
+                        ret = False
+                else:
+                    # Using OpenCV VideoCapture
+                    ret, frame = cap.read()
+                
+                if not ret or frame is None:
                     if video_path:
                         logger.info("End of video stream")
                     else:
@@ -380,7 +357,7 @@ class ClassifierTester:
                 inference_time = time.time() - start_time
                 total_inference_time += inference_time
                 
-                # Draw bounding boxes using classifier's method
+                # Draw bounding boxes
                 if config.DRAW_BBOXES and detections:
                     frame = self.classifier.draw_bounding_boxes(frame, detections)
                 
@@ -406,8 +383,15 @@ class ClassifierTester:
                     cv2.imwrite(str(output_path), frame)
                     logger.info(f"✓ Saved frame to {output_path}")
         
+        except KeyboardInterrupt:
+            logger.info("\n⚠ Interrupted by user")
+        
         finally:
-            cap.release()
+            # Cleanup
+            if picam2:
+                picam2.stop()
+            if cap:
+                cap.release()
             cv2.destroyAllWindows()
             
             if frame_count > 0:
@@ -479,7 +463,7 @@ class ClassifierTester:
             original_name = Path(original_path).stem
             output_path = output_dir / f"{original_name}_annotated.jpg"
             
-            # Draw bounding boxes using classifier's method
+            # Draw bounding boxes
             if detections:
                 annotated_frame = self.classifier.draw_bounding_boxes(frame.copy(), detections)
             else:
@@ -496,7 +480,7 @@ class ClassifierTester:
     def _show_image(self, frame, detections):
         """Display image with bounding boxes"""
         try:
-            # Draw bounding boxes using classifier's method
+            # Draw bounding boxes
             if detections:
                 display_frame = self.classifier.draw_bounding_boxes(frame.copy(), detections)
             else:
@@ -558,6 +542,12 @@ def main():
     )
     
     parser.add_argument(
+        '--no-picamera',
+        action='store_true',
+        help='Do not use picamera2, use OpenCV instead'
+    )
+    
+    parser.add_argument(
         '--iterations',
         type=int,
         default=100,
@@ -598,7 +588,10 @@ def main():
             tester.test_video_stream(video_path=args.path)
         
         elif args.mode == 'camera':
-            tester.test_video_stream(camera_index=args.camera_index)
+            tester.test_video_stream(
+                camera_index=args.camera_index,
+                use_picamera=not args.no_picamera
+            )
         
         elif args.mode == 'benchmark':
             if not args.path:
