@@ -6,8 +6,8 @@ import csv
 import logging
 import sys
 from pathlib import Path
-import classifier
 import config
+import json
 from logging_config import setup_logging
 from pixhawk import Pixhawk
 from camera import Camera
