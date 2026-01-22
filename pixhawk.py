@@ -26,8 +26,6 @@ class Pixhawk:
 
         # Sensors
         self.imu_accel = {"x": 0.0, "y": 0.0, "z": 0.0}
-        self.battery_remaining = 0
-        self.battery_type = None
         self.groundspeed = 0.0
 
         # Attitude Data
