@@ -95,14 +95,14 @@ class FlightMetricsLogger:
     # Call when the drone arms
     def start_flight(self):
         self.armed = True
-        self.flight_start_time = datetime.utcnow().isoformat()
+        self.flight_start_time = datetime.now()
         self.flight_id = self._generate_flight_id()
         logger.info(f"🛫 Flight {self.flight_id} started at {self.flight_start_time}.")
 
     # Call when the drone disarms
     def end_flight(self):
         self.armed = False
-        self.flight_end_time = datetime.utcnow().isoformat()
+        self.flight_end_time = datetime.now()
         logger.info(f"🛬 Flight {self.flight_id} ended at {self.flight_end_time}.")
 
         # Increment flight number for next flight
@@ -144,6 +144,9 @@ class FlightMetricsLogger:
         duration_sec = 0.0
         if self.flight_start_time and self.flight_end_time:
             duration_sec = (self.flight_end_time - self.flight_start_time).total_seconds()
+        elif self.flight_start_time:
+            # Flight is still ongoing, calculate duration from start to now
+            duration_sec = (datetime.now() - self.flight_start_time).total_seconds()
 
         # Write telemetry row
         with open(self.csv_file, "a", newline="") as f:
@@ -161,7 +164,7 @@ class FlightMetricsLogger:
                 flight_mode,
                 nav_state,
                 data.get("is_hovering", False),
-                self.flight_start_time if isinstance(self.flight_start_time, str) else (self.flight_start_time.isoformat() if self.flight_start_time else ""),
+                self.flight_start_time.isoformat() if self.flight_start_time else "",
                 self.flight_end_time.isoformat() if self.flight_end_time else "",
                 round(duration_sec, 1)
             ])
