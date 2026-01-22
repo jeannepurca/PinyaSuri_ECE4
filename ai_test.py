@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-# ai_test.py - Headless camera AI test (SAVE ONLY)
+# ai_test.py - Headless ENTER-to-capture AI test
 
 import time
 import logging
 from pathlib import Path
 import cv2
-import numpy as np
 from classifier import PinyaSuriAI
 import config
 
@@ -72,7 +71,7 @@ def open_opencv_camera(index=0):
 # ----------------------------
 def main():
     logger.info("=" * 60)
-    logger.info("🍍 PINYASURI AI – HEADLESS CAMERA TEST")
+    logger.info("🍍 PINYASURI AI – PRESS ENTER TO CAPTURE")
     logger.info("=" * 60)
 
     # Load classifier
@@ -89,14 +88,17 @@ def main():
         logger.error("❌ Failed to open any camera")
         return
 
-    logger.info("📸 Camera running. Press CTRL+C to stop.")
+    logger.info("📸 Camera ready")
+    logger.info("👉 Press ENTER to capture image")
+    logger.info("👉 Press CTRL+C to exit")
     logger.info("=" * 60)
 
     frame_count = 0
-    start_time = time.time()
 
     try:
         while True:
+            input()  # WAIT FOR ENTER
+
             # Capture frame
             if picam2:
                 frame = picam2.capture_array()
@@ -108,6 +110,8 @@ def main():
                     break
 
             frame_count += 1
+
+            logger.info(f"📷 Capturing frame {frame_count}...")
 
             # Run detection
             t0 = time.time()
@@ -121,21 +125,19 @@ def main():
             if detections:
                 frame = classifier.draw_bounding_boxes(frame, detections)
 
-            # Save image every frame (or change to % N)
-            output_path = OUTPUT_DIR / f"frame_{frame_count:06d}.jpg"
+            # Save image
+            output_path = OUTPUT_DIR / f"capture_{frame_count:04d}.jpg"
             cv2.imwrite(str(output_path), frame)
 
             logger.info(
-                f"Frame {frame_count:04d} | "
+                f"✓ Saved {output_path.name} | "
                 f"Detections: {len(detections)} | "
                 f"Inference: {infer_time*1000:.1f} ms"
             )
-
-            # Optional throttle (reduce CPU load)
-            time.sleep(0.05)
+            logger.info("👉 Press ENTER to capture again")
 
     except KeyboardInterrupt:
-        logger.info("\n🛑 Stopped by user")
+        logger.info("\n🛑 Exiting...")
 
     finally:
         if picam2:
@@ -143,13 +145,7 @@ def main():
         if cap:
             cap.release()
 
-        elapsed = time.time() - start_time
-        fps = frame_count / elapsed if elapsed > 0 else 0
-        logger.info("=" * 60)
-        logger.info(f"Processed {frame_count} frames")
-        logger.info(f"Average FPS: {fps:.2f}")
-        logger.info("Images saved to: test_output/")
-        logger.info("=" * 60)
+        logger.info("Camera closed")
 
 
 if __name__ == "__main__":
