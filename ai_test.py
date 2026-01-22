@@ -37,17 +37,28 @@ OUTPUT_DIR.mkdir(exist_ok=True)
 def open_picamera2(width=640, height=480):
     if not PICAMERA2_AVAILABLE:
         return None
+
     try:
         logger.info("Trying Picamera2...")
         picam2 = Picamera2()
-        cfg = picam2.create_preview_configuration(
+
+        cfg = picam2.create_still_configuration(
             main={"size": (width, height), "format": "RGB888"}
         )
         picam2.configure(cfg)
         picam2.start()
-        time.sleep(1)
-        logger.info("✓ Picamera2 started")
+
+        # Let AWB/AE settle
+        time.sleep(2)
+
+        # Lock white balance for consistent color
+        picam2.set_controls({
+            "AwbEnable": False
+        })
+
+        logger.info("✓ Picamera2 started (still mode, AWB locked)")
         return picam2
+
     except Exception as e:
         logger.warning(f"Picamera2 failed: {e}")
         return None
