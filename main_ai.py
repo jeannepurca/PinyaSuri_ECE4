@@ -400,7 +400,7 @@ def main_loop(pixhawk, camera, classifier, metrics, logger):
             # Show distance instead of reached log
             dist_str = f"{pixhawk.wp_dist:.2f}m" if pixhawk.wp_dist else "N/A"
             
-            # ✅ FIX: Check if position exists before accessing
+            # Check if position exists before accessing
             if pixhawk.position:
                 alt_str = f"{pixhawk.position['rel_alt']:.1f}m"
             else:

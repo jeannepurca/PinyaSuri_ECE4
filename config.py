@@ -114,18 +114,15 @@ SERVER = "http://WEB_SERVER_IP:5000"
 MODEL_PATH = MODEL_DIR / "YOLOv8n_PinyaSuri_AI.tflite"
 DETECTION_THRESHOLD = 0.5
 
-# Default class names (fallback if model doesn't provide them)
-# These should match your training labels
-DEFAULT_CLASS_NAMES = {
-    0: "Healthy",
-    1: "Mealybug Wilt Disease",
-    2: "Root Rot Disease",
-    3: "Crown Rot Disease",
-    4: "Fruit Rot Disease",
-    5: "Fruit Fasciation Disorder",
-    6: "Multiple Crown Disorder"
+CLASS_NAMES = {
+    0: "Crown Rot Disease",
+    1: "Fruit Fasciation Disorder",
+    2: "Fruit Rot Disease",
+    3: "Healthy",
+    4: "Mealybug Wilt Disease",
+    5: "Multiple Crown Disorder",
+    6: "Root Rot Disease"
 }
 
-def get_class_name(index: int, class_names: dict = None) -> str:
-    names = class_names if class_names is not None else DEFAULT_CLASS_NAMES
-    return names.get(index, f"unknown_{index}")
+def get_class_name(index: int) -> str:
+    return CLASS_NAMES.get(index, f"unknown_{index}")
