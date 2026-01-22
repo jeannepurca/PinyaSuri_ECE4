@@ -39,6 +39,12 @@ class FlightDataAggregator:
         """Add detection data for a specific waypoint image"""
         flight = self.flights[flight_id]
         
+        # Track start/end times
+        current_time = datetime.now()
+        if flight['start_time'] is None:
+            flight['start_time'] = current_time
+        flight['end_time'] = current_time
+        
         # Initialize waypoint if first time
         if waypoint not in flight['waypoints']:
             flight['waypoints'][waypoint] = {
@@ -46,29 +52,16 @@ class FlightDataAggregator:
                 'total_pineapples': 0,
                 'healthy': 0,
                 'afflicted': 0,
-                'afflictions': defaultdict(list)
+                'afflictions': defaultdict(int)
             }
             flight['captured_waypoints'].add(waypoint)
         
         wp_data = flight['waypoints'][waypoint]
         
         # Process detections for this image
-        image_data = {
-            'image_path': str(image_path),
-            'timestamp': datetime.now(timezone.utc).isoformat(),
-            'detections': []
-        }
-        
         for det in detections:
             class_name = det['class_name']
             confidence = det['confidence']
-            
-            # Add to image detections
-            image_data['detections'].append({
-                'class': class_name,
-                'confidence': round(confidence, 3),
-                'bbox': [round(x, 4) for x in det['bbox']]
-            })
             
             # Update waypoint counts
             wp_data['total_pineapples'] += 1
@@ -82,104 +75,89 @@ class FlightDataAggregator:
                 wp_data['afflicted'] += 1
                 flight['afflicted_count'] += 1
                 
-                # Track affliction details
-                wp_data['afflictions'][class_name].append({
-                    'confidence': round(confidence, 3),
-                    'bbox': [round(x, 4) for x in det['bbox']]
-                })
+                # Track affliction counts
+                wp_data['afflictions'][class_name] += 1
                 flight['afflictions'][class_name].append({
                     'waypoint': waypoint,
                     'confidence': round(confidence, 3)
                 })
         
-        # Add image to waypoint
-        wp_data['images'].append(image_data)
+        # Store image path for this waypoint
+        if image_path not in wp_data['images']:
+            wp_data['images'].append(str(image_path))
     
     def generate_flight_summary(self, flight_id, total_waypoints):
-        """Generate comprehensive flight summary JSON"""
+        """Generate comprehensive flight summary JSON in the new format"""
         flight = self.flights[flight_id]
         flight['total_waypoints'] = total_waypoints
         
         # Calculate mission status
         captured_count = len(flight['captured_waypoints'])
-        incomplete_waypoints = []
-        for wp in range(1, total_waypoints + 1):
-            if wp not in flight['captured_waypoints']:
-                incomplete_waypoints.append(wp)
-        
-        mission_status = "COMPLETED" if captured_count == total_waypoints else "INCOMPLETE"
+        mission_status = "Completed" if captured_count >= total_waypoints else "Incomplete"
         
         # Find most common affliction
         most_common_affliction = None
         max_count = 0
-        affliction_summary = {}
         
         for affliction, instances in flight['afflictions'].items():
             count = len(instances)
-            avg_conf = sum(i['confidence'] for i in instances) / count if count > 0 else 0
-            
-            affliction_summary[affliction] = {
-                'count': count,
-                'avg_confidence': round(avg_conf, 3)
-            }
-            
             if count > max_count:
                 max_count = count
                 most_common_affliction = affliction
         
         # Calculate overall average confidence
         all_confidences = []
-        for wp_data in flight['waypoints'].values():
-            for img in wp_data['images']:
-                for det in img['detections']:
-                    all_confidences.append(det['confidence'])
+        for instances in flight['afflictions'].values():
+            for inst in instances:
+                all_confidences.append(inst['confidence'])
         
         avg_confidence = sum(all_confidences) / len(all_confidences) if all_confidences else 0
         
+        # Format times
+        date_str = flight['start_time'].strftime("%B %d, %Y") if flight['start_time'] else datetime.now().strftime("%B %d, %Y")
+        start_time_str = flight['start_time'].strftime("%H:%M") if flight['start_time'] else "00:00"
+        end_time_str = flight['end_time'].strftime("%H:%M") if flight['end_time'] else "00:00"
+        
         # Build waypoint details
-        waypoint_details = []
+        waypoint_list = []
         for wp_num in sorted(flight['waypoints'].keys()):
             wp_data = flight['waypoints'][wp_num]
             
-            # Build affliction details for this waypoint
-            wp_afflictions = []
-            for affliction, instances in wp_data['afflictions'].items():
-                wp_afflictions.append({
-                    'name': affliction,
-                    'count': len(instances),
-                    'avg_confidence': round(sum(i['confidence'] for i in instances) / len(instances), 3),
-                    'instances': instances
-                })
+            # Get waypoint name
+            waypoint_name = config.get_waypoint_name(wp_num) if hasattr(config, 'get_waypoint_name') else f"WP{wp_num}"
             
-            waypoint_details.append({
-                'waypoint': wp_num,
-                'waypoint_name': config.get_waypoint_name(wp_num) if hasattr(config, 'get_waypoint_name') else f"WP{wp_num}",
-                'images': wp_data['images'],
-                'summary': {
-                    'total_pineapples': wp_data['total_pineapples'],
-                    'healthy': wp_data['healthy'],
-                    'afflicted': wp_data['afflicted'],
-                    'afflictions': wp_afflictions
-                }
-            })
+            # Use first image for this waypoint
+            image_path = wp_data['images'][0] if wp_data['images'] else ""
+            
+            waypoint_entry = {
+                'waypoint_id': waypoint_name,
+                'image': image_path,
+                'num_pineapples': wp_data['total_pineapples'],
+                'healthy': wp_data['healthy'],
+                'afflicted': wp_data['afflicted'],
+                'afflictions': dict(wp_data['afflictions'])
+            }
+            
+            waypoint_list.append(waypoint_entry)
         
-        # Build complete summary
+        # Build complete summary in new format
         summary = {
-            'flight_id': flight_id,
-            'timestamp_utc': datetime.now(timezone.utc).isoformat(),
-            'flight_summary': {
+            'id': flight_id,
+            'type': 'flight',
+            'date': date_str,
+            'start_time': start_time_str,
+            'end_time': end_time_str,
+            'summary': {
                 'total_waypoints': total_waypoints,
                 'captured_waypoints': captured_count,
-                'incomplete_waypoints': incomplete_waypoints,
                 'mission_status': mission_status,
                 'pineapples_detected': flight['total_detections'],
                 'healthy_pineapples': flight['healthy_count'],
                 'afflicted_pineapples': flight['afflicted_count'],
                 'most_common_affliction': most_common_affliction,
-                'avg_confidence': round(avg_confidence, 3),
-                'affliction_summary': affliction_summary
+                'avg_confidence': round(avg_confidence * 100, 1)  # Convert to percentage
             },
-            'waypoints': waypoint_details
+            'waypoints': waypoint_list
         }
         
         return summary
@@ -198,7 +176,7 @@ class FlightDataAggregator:
             filepath = summary_dir / filename
             
             with open(filepath, 'w') as f:
-                json.dump(summary, f, indent=2)
+                json.dump(summary, f, indent=4)
             
             logger.info(f"✓ Flight summary saved: {filepath}")
             return filepath
@@ -210,6 +188,75 @@ class FlightDataAggregator:
 
 # Global aggregator instance
 flight_aggregator = FlightDataAggregator()
+
+
+# ============================================================================
+# INDIVIDUAL UPLOAD DATA GENERATOR
+# ============================================================================
+
+def generate_upload_entry(image_path, detections, timestamp=None):
+    """Generate an individual upload entry in the new format"""
+    if timestamp is None:
+        timestamp = datetime.now()
+    
+    # Sort detections by confidence
+    sorted_detections = sorted(detections, key=lambda x: x['confidence'], reverse=True)
+    
+    # Get primary affliction (highest confidence)
+    primary_affliction = sorted_detections[0]['class_name'] if sorted_detections else "Unknown"
+    primary_confidence = sorted_detections[0]['confidence'] if sorted_detections else 0
+    
+    # Build afflictions list
+    afflictions_list = []
+    for det in sorted_detections:
+        afflictions_list.append({
+            'affliction': det['class_name'],
+            'confidence': round(det['confidence'], 3)
+        })
+    
+    # Format timestamp
+    timestamp_str = timestamp.strftime("%B %d, %Y %H:%M:%S")
+    date_str = timestamp.strftime("%B %d, %Y")
+    time_str = timestamp.strftime("%H:%M:%S")
+    
+    upload_entry = {
+        'type': 'upload',
+        'date': date_str,
+        'time': time_str,
+        'image': str(image_path),
+        'affliction': primary_affliction,
+        'afflictions': afflictions_list,
+        'confidence': round(primary_confidence, 3),
+        'recommendation': 'Apply appropriate treatment' if primary_affliction.lower() != 'healthy' else 'No treatment needed',
+        'timestamp': timestamp_str
+    }
+    
+    return upload_entry
+
+
+def save_upload_entry(image_path, detections):
+    """Save individual upload entry to JSON file"""
+    try:
+        upload_entry = generate_upload_entry(image_path, detections)
+        
+        # Create upload directory
+        upload_dir = config.JSON_DIR / "uploads"
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Generate filename based on timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"upload_{timestamp}.json"
+        filepath = upload_dir / filename
+        
+        with open(filepath, 'w') as f:
+            json.dump(upload_entry, f, indent=4)
+        
+        logger.info(f"✓ Upload entry saved: {filepath}")
+        return filepath
+        
+    except Exception as e:
+        logger.error(f"⚠ Failed to save upload entry: {e}")
+        return None
 
 
 # ============================================================================
@@ -466,6 +513,14 @@ def finalize_flight_summary(flight_id, total_waypoints):
     if summary_path:
         upload_queue.add_json(summary_path)
     return summary_path
+
+
+def save_individual_upload(image_path, detections):
+    """Save individual upload entry and queue for upload"""
+    upload_path = save_upload_entry(image_path, detections)
+    if upload_path:
+        upload_queue.add_json(upload_path)
+    return upload_path
 
 
 def get_json_dir_for_today():
