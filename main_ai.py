@@ -190,7 +190,7 @@ def handle_waypoint_capture(pixhawk, camera, classifier, metrics, waypoint, flig
                 logger.info(f"  ✓ Frame {i+1}/{num_captures} captured "
                            f"(size: {Path(image_path).stat().st_size / 1024:.1f} KB)")
                 
-                # ✅ ADD THIS - Run AI detection
+                # Run AI detection
                 try:
                     import cv2
                     
@@ -399,8 +399,15 @@ def main_loop(pixhawk, camera, classifier, metrics, logger):
             last_debug_time = time.time()
             # Show distance instead of reached log
             dist_str = f"{pixhawk.wp_dist:.2f}m" if pixhawk.wp_dist else "N/A"
+            
+            # ✅ FIX: Check if position exists before accessing
+            if pixhawk.position:
+                alt_str = f"{pixhawk.position['rel_alt']:.1f}m"
+            else:
+                alt_str = "N/A"
+            
             logger.debug(f"[STATUS] Mode: {pixhawk.mode}, WP: {pixhawk.last_wp}, "
-                        f"Alt: {pixhawk.position['rel_alt']:.1f}m, "
+                        f"Alt: {alt_str}, "
                         f"Dist to WP: {dist_str}, "
                         f"Captured: {captured_wp}")
 
@@ -408,7 +415,7 @@ def main_loop(pixhawk, camera, classifier, metrics, logger):
         wp = pixhawk.current_waypoint or {"lat": None, "lon": None, "alt": None}
 
         # Update metrics during flight
-        if pixhawk.armed:
+        if pixhawk.armed and pixhawk.position:  # ✅ FIX: Added position check
             telemetry = {
                 "attitude": {
                     "roll": getattr(pixhawk, "roll", 0.0),
