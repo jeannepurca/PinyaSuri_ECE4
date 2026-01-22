@@ -190,22 +190,48 @@ class ClassifierTester:
         logger.info("  Trying V4L2 backend...")
         cap = cv2.VideoCapture(camera_index, cv2.CAP_V4L2)
         if cap.isOpened():
-            logger.info("  ✓ Camera opened with V4L2 backend")
-            return cap
+            # Configure camera settings
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            cap.set(cv2.CAP_PROP_FPS, 30)
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Reduce buffer to get fresh frames
+            
+            # Wait a moment for camera to initialize
+            time.sleep(0.5)
+            
+            # Try to read a test frame
+            for attempt in range(5):
+                ret, frame = cap.read()
+                if ret and frame is not None:
+                    logger.info("  ✓ Camera opened with V4L2 backend")
+                    return cap
+                time.sleep(0.2)
+            
+            logger.warning("  V4L2 backend opened but cannot read frames")
         cap.release()
         
         # Method 2: Try default backend with lower resolution
-        logger.info("  Trying default backend with lower resolution...")
+        logger.info("  Trying default backend with explicit MJPEG...")
         cap = cv2.VideoCapture(camera_index)
         if cap.isOpened():
-            # Set lower resolution to reduce memory issues
+            # Try MJPEG format which is more compatible
+            cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'))
             cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
             cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            cap.set(cv2.CAP_PROP_FPS, 30)
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            
+            time.sleep(0.5)
+            
             # Test if we can read a frame
-            ret, _ = cap.read()
-            if ret:
-                logger.info("  ✓ Camera opened with default backend")
-                return cap
+            for attempt in range(5):
+                ret, frame = cap.read()
+                if ret and frame is not None:
+                    logger.info("  ✓ Camera opened with default backend")
+                    return cap
+                time.sleep(0.2)
+            
+            logger.warning("  Default backend opened but cannot read frames")
         cap.release()
         
         # Method 3: Try PiCamera if available (for older Raspberry Pi camera modules)
@@ -238,11 +264,36 @@ class ClassifierTester:
             logger.info(f"  Trying camera index {idx}...")
             cap = cv2.VideoCapture(idx, cv2.CAP_V4L2)
             if cap.isOpened():
-                ret, _ = cap.read()
-                if ret:
-                    logger.info(f"  ✓ Camera opened at index {idx}")
-                    return cap
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                time.sleep(0.5)
+                
+                for attempt in range(5):
+                    ret, frame = cap.read()
+                    if ret and frame is not None:
+                        logger.info(f"  ✓ Camera opened at index {idx}")
+                        return cap
+                    time.sleep(0.2)
             cap.release()
+        
+        # Method 5: Try with YUYV format (more compatible)
+        logger.info("  Trying V4L2 with YUYV format...")
+        cap = cv2.VideoCapture(camera_index, cv2.CAP_V4L2)
+        if cap.isOpened():
+            cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc('Y', 'U', 'Y', 'V'))
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            time.sleep(0.5)
+            
+            for attempt in range(5):
+                ret, frame = cap.read()
+                if ret and frame is not None:
+                    logger.info("  ✓ Camera opened with YUYV format")
+                    return cap
+                time.sleep(0.2)
+        cap.release()
         
         logger.error("  ✗ Failed to open camera with all methods")
         return None
@@ -277,13 +328,21 @@ class ClassifierTester:
                 logger.error("   sudo usermod -a -G video $USER")
                 logger.error("   (logout and login again)")
                 logger.error("")
-                logger.error("3. Test camera directly:")
+                logger.error("3. Check if camera is in use:")
+                logger.error("   sudo fuser /dev/video0")
+                logger.error("")
+                logger.error("4. Test camera directly:")
                 logger.error("   v4l2-ctl --list-devices")
+                logger.error("   v4l2-ctl -d /dev/video0 --list-formats-ext")
                 logger.error("   raspistill -o test.jpg  (for Pi Camera)")
                 logger.error("   libcamera-hello  (for newer Pi OS)")
                 logger.error("")
-                logger.error("4. Try increasing GPU memory (for Pi):")
+                logger.error("5. Try increasing GPU memory (for Pi):")
                 logger.error("   sudo raspi-config → Performance → GPU Memory → 128")
+                logger.error("")
+                logger.error("6. Disable other camera applications:")
+                logger.error("   sudo killall libcamera-hello")
+                logger.error("   sudo killall rpicam-hello")
                 logger.error("=" * 60)
                 return
         
