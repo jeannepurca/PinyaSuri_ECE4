@@ -161,7 +161,7 @@ class FlightMetricsLogger:
                 flight_mode,
                 nav_state,
                 data.get("is_hovering", False),
-                self.flight_start_time.isoformat() if self.flight_start_time else "",
+                self.flight_start_time if isinstance(self.flight_start_time, str) else (self.flight_start_time.isoformat() if self.flight_start_time else ""),
                 self.flight_end_time.isoformat() if self.flight_end_time else "",
                 round(duration_sec, 1)
             ])
