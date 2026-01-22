@@ -174,6 +174,79 @@ class ClassifierTester:
         
         logger.info("=" * 60)
     
+    def _open_camera(self, camera_index=0):
+        """
+        Try multiple methods to open the camera
+        
+        Args:
+            camera_index: Camera index to try
+            
+        Returns:
+            cv2.VideoCapture object or None
+        """
+        logger.info(f"Attempting to open camera {camera_index}...")
+        
+        # Method 1: Try V4L2 backend directly (best for Raspberry Pi)
+        logger.info("  Trying V4L2 backend...")
+        cap = cv2.VideoCapture(camera_index, cv2.CAP_V4L2)
+        if cap.isOpened():
+            logger.info("  ✓ Camera opened with V4L2 backend")
+            return cap
+        cap.release()
+        
+        # Method 2: Try default backend with lower resolution
+        logger.info("  Trying default backend with lower resolution...")
+        cap = cv2.VideoCapture(camera_index)
+        if cap.isOpened():
+            # Set lower resolution to reduce memory issues
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            # Test if we can read a frame
+            ret, _ = cap.read()
+            if ret:
+                logger.info("  ✓ Camera opened with default backend")
+                return cap
+        cap.release()
+        
+        # Method 3: Try PiCamera if available (for older Raspberry Pi camera modules)
+        try:
+            logger.info("  Trying libcamera/PiCamera...")
+            # For newer Raspberry Pi OS with libcamera
+            import subprocess
+            result = subprocess.run(['libcamera-hello', '--list-cameras'], 
+                                   capture_output=True, timeout=2)
+            if result.returncode == 0:
+                logger.info("  libcamera detected, trying GStreamer pipeline...")
+                # Use GStreamer pipeline for libcamera
+                pipeline = (
+                    "libcamerasrc ! "
+                    "video/x-raw, width=640, height=480, framerate=30/1 ! "
+                    "videoconvert ! "
+                    "appsink"
+                )
+                cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
+                if cap.isOpened():
+                    logger.info("  ✓ Camera opened with libcamera pipeline")
+                    return cap
+                cap.release()
+        except Exception as e:
+            logger.debug(f"  libcamera not available: {e}")
+        
+        # Method 4: Try different camera indices
+        logger.info("  Trying different camera indices...")
+        for idx in [1, 2]:
+            logger.info(f"  Trying camera index {idx}...")
+            cap = cv2.VideoCapture(idx, cv2.CAP_V4L2)
+            if cap.isOpened():
+                ret, _ = cap.read()
+                if ret:
+                    logger.info(f"  ✓ Camera opened at index {idx}")
+                    return cap
+            cap.release()
+        
+        logger.error("  ✗ Failed to open camera with all methods")
+        return None
+    
     def test_video_stream(self, video_path=None, camera_index=0):
         """
         Test classifier on video stream or camera feed
@@ -185,18 +258,44 @@ class ClassifierTester:
         if video_path:
             cap = cv2.VideoCapture(str(video_path))
             source_name = Path(video_path).name
+            
+            if not cap.isOpened():
+                logger.error(f"⚠ Failed to open video file: {source_name}")
+                return
         else:
-            cap = cv2.VideoCapture(camera_index)
+            cap = self._open_camera(camera_index)
             source_name = f"Camera {camera_index}"
-        
-        if not cap.isOpened():
-            logger.error(f"⚠ Failed to open video source: {source_name}")
-            return
+            
+            if cap is None:
+                logger.error("\n" + "=" * 60)
+                logger.error("CAMERA TROUBLESHOOTING TIPS:")
+                logger.error("=" * 60)
+                logger.error("1. Check if camera is connected:")
+                logger.error("   ls /dev/video*")
+                logger.error("")
+                logger.error("2. Check camera permissions:")
+                logger.error("   sudo usermod -a -G video $USER")
+                logger.error("   (logout and login again)")
+                logger.error("")
+                logger.error("3. Test camera directly:")
+                logger.error("   v4l2-ctl --list-devices")
+                logger.error("   raspistill -o test.jpg  (for Pi Camera)")
+                logger.error("   libcamera-hello  (for newer Pi OS)")
+                logger.error("")
+                logger.error("4. Try increasing GPU memory (for Pi):")
+                logger.error("   sudo raspi-config → Performance → GPU Memory → 128")
+                logger.error("=" * 60)
+                return
         
         logger.info("=" * 60)
         logger.info(f"🎥 Testing video stream: {source_name}")
         logger.info("Press 'q' to quit, 's' to save current frame")
         logger.info("=" * 60)
+        
+        # Get actual resolution
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        logger.info(f"Resolution: {width}x{height}")
         
         frame_count = 0
         total_inference_time = 0
@@ -205,7 +304,10 @@ class ClassifierTester:
             while True:
                 ret, frame = cap.read()
                 if not ret:
-                    logger.info("End of video stream")
+                    if video_path:
+                        logger.info("End of video stream")
+                    else:
+                        logger.error("Failed to read frame from camera")
                     break
                 
                 frame_count += 1
@@ -249,9 +351,12 @@ class ClassifierTester:
             cap.release()
             cv2.destroyAllWindows()
             
-            avg_fps = frame_count / total_inference_time if total_inference_time > 0 else 0
-            logger.info(f"\nProcessed {frame_count} frames")
-            logger.info(f"Average FPS: {avg_fps:.2f}")
+            if frame_count > 0:
+                avg_fps = frame_count / total_inference_time if total_inference_time > 0 else 0
+                logger.info(f"\nProcessed {frame_count} frames")
+                logger.info(f"Average FPS: {avg_fps:.2f}")
+            else:
+                logger.warning("\nNo frames were processed")
     
     def benchmark_performance(self, test_image_path, num_iterations=100):
         """
