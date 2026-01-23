@@ -112,7 +112,7 @@ BURST_INTERVAL = 0.5  # Seconds between captures
 # ============================================================================  
 SERVER = "https://finalfinaledit-pinyasuri-webdev.onrender.com/api/upload-flight-log"
 MODEL_PATH = MODEL_DIR / "YOLOv8n_PinyaSuri_AI.tflite"
-DETECTION_THRESHOLD = 0.0
+DETECTION_THRESHOLD = 0.7
 
 CLASS_NAMES = {
     0: "Crown Rot Disease",
