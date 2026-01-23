@@ -64,7 +64,7 @@ class PinyaSuriAI:
         except Exception as e:
             logger.error(f"⚠ Preprocessing failed: {e}")
             return None
-    
+
     def detect(self, frame):
         """
         Detect multiple pineapples in a frame (YOLOv8 format)
@@ -85,10 +85,6 @@ class PinyaSuriAI:
             
             # YOLOv8 has 1 output tensor
             output_data = self.interpreter.get_tensor(self.output_details[0]['index'])
-            
-            # YOLOv8 output shape: [1, num_features, num_boxes]
-            # For single class: [1, 5, 8400] where 5 = [x, y, w, h, class_conf]
-            # For COCO (80 classes): [1, 84, 8400] where 84 = [x, y, w, h, class1...class80]
             
             logger.debug(f"YOLOv8 output shape: {output_data.shape}")
             
@@ -118,13 +114,13 @@ class PinyaSuriAI:
                 
                 class_name = config.get_class_name(class_idx)
                 
-                # YOLOv8 outputs are already normalized [0, 1]
-                # Just convert from center format to corner format
-                xmin = x_center - width / 2
-                ymin = y_center - height / 2
-                xmax = x_center + width / 2
-                ymax = y_center + height / 2
-
+                # YOLOv8 coordinates are already normalized [0, 1] relative to input size
+                # Convert from center format to corner format
+                xmin = (x_center - width / 2) / self.input_width
+                ymin = (y_center - height / 2) / self.input_height
+                xmax = (x_center + width / 2) / self.input_width
+                ymax = (y_center + height / 2) / self.input_height
+                
                 # Clamp to [0, 1]
                 xmin = max(0.0, min(1.0, xmin))
                 ymin = max(0.0, min(1.0, ymin))
@@ -155,7 +151,7 @@ class PinyaSuriAI:
             logger.error(f"⚠ Detection failed: {e}")
             import traceback
             logger.error(traceback.format_exc())
-            return []    
+            return []
         
     def detect_with_nms(self, frame, iou_threshold=0.5):
         """
