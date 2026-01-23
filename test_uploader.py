@@ -75,8 +75,10 @@ def upload_json_file(json_path):
             headers={"Content-Type": "application/json"}
         )
         
-        if response.status_code == 200:
+        # Success: 200 OK or 201 Created
+        if response.status_code in [200, 201]:
             logger.info(f"✅ SUCCESS: {json_file.name}")
+            logger.info(f"   Status Code: {response.status_code}")
             try:
                 response_data = response.json()
                 logger.info(f"   Server response: {response_data}")
