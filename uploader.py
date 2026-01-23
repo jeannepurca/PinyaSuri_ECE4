@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# uploader.py - Enhanced with comprehensive flight summary JSON
+# uploader.py - Enhanced with POST-FLIGHT upload only
 
 import json
 import requests
@@ -32,7 +32,8 @@ class FlightDataAggregator:
             'afflicted_count': 0,
             'afflictions': defaultdict(list),
             'start_time': None,
-            'end_time': None
+            'end_time': None,
+            'images': []  # Track all images for this flight
         })
     
     def add_detection_data(self, flight_id, waypoint, image_path, detections):
@@ -44,6 +45,10 @@ class FlightDataAggregator:
         if flight['start_time'] is None:
             flight['start_time'] = current_time
         flight['end_time'] = current_time
+        
+        # Track images for this flight
+        if str(image_path) not in flight['images']:
+            flight['images'].append(str(image_path))
         
         # Initialize waypoint if first time
         if waypoint not in flight['waypoints']:
@@ -85,6 +90,10 @@ class FlightDataAggregator:
         # Store image path for this waypoint
         if image_path not in wp_data['images']:
             wp_data['images'].append(str(image_path))
+    
+    def get_flight_images(self, flight_id):
+        """Get all images associated with a flight"""
+        return self.flights[flight_id]['images']
     
     def generate_flight_summary(self, flight_id, total_waypoints):
         """Generate comprehensive flight summary JSON in the new format"""
@@ -191,94 +200,28 @@ flight_aggregator = FlightDataAggregator()
 
 
 # ============================================================================
-# INDIVIDUAL UPLOAD DATA GENERATOR
-# ============================================================================
-
-def generate_upload_entry(image_path, detections, timestamp=None):
-    """Generate an individual upload entry in the new format"""
-    if timestamp is None:
-        timestamp = datetime.now()
-    
-    # Sort detections by confidence
-    sorted_detections = sorted(detections, key=lambda x: x['confidence'], reverse=True)
-    
-    # Get primary affliction (highest confidence)
-    primary_affliction = sorted_detections[0]['class_name'] if sorted_detections else "Unknown"
-    primary_confidence = sorted_detections[0]['confidence'] if sorted_detections else 0
-    
-    # Build afflictions list
-    afflictions_list = []
-    for det in sorted_detections:
-        afflictions_list.append({
-            'affliction': det['class_name'],
-            'confidence': round(det['confidence'], 3)
-        })
-    
-    # Format timestamp
-    timestamp_str = timestamp.strftime("%B %d, %Y %H:%M:%S")
-    date_str = timestamp.strftime("%B %d, %Y")
-    time_str = timestamp.strftime("%H:%M:%S")
-    
-    upload_entry = {
-        'type': 'upload',
-        'date': date_str,
-        'time': time_str,
-        'image': str(image_path),
-        'affliction': primary_affliction,
-        'afflictions': afflictions_list,
-        'confidence': round(primary_confidence, 3),
-        'recommendation': 'Apply appropriate treatment' if primary_affliction.lower() != 'healthy' else 'No treatment needed',
-        'timestamp': timestamp_str
-    }
-    
-    return upload_entry
-
-
-def save_upload_entry(image_path, detections):
-    """Save individual upload entry to JSON file"""
-    try:
-        upload_entry = generate_upload_entry(image_path, detections)
-        
-        # Create upload directory
-        upload_dir = config.JSON_DIR / "uploads"
-        upload_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Generate filename based on timestamp
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"upload_{timestamp}.json"
-        filepath = upload_dir / filename
-        
-        with open(filepath, 'w') as f:
-            json.dump(upload_entry, f, indent=4)
-        
-        logger.info(f"✓ Upload entry saved: {filepath}")
-        return filepath
-        
-    except Exception as e:
-        logger.error(f"⚠ Failed to save upload entry: {e}")
-        return None
-
-
-# ============================================================================
-# UPLOAD QUEUE SYSTEM
+# UPLOAD QUEUE SYSTEM (POST-FLIGHT ONLY)
 # ============================================================================
 
 class UploadQueue:
-    """Manages upload queue with automatic retry when connection is restored"""
+    """Manages upload queue - only uploads AFTER flight completes"""
     def __init__(self, max_retries=3, retry_delay=60):
+        self.pending_uploads = []  # Store files until flight ends
         self.upload_queue = queue.Queue()
         self.failed_uploads = []
         self.max_retries = max_retries
         self.retry_delay = retry_delay
         self.worker_thread = None
         self.running = False
+        self.uploading_enabled = False  # Only enable after flight ends
         self.stats = {
             "json_queued": 0,
             "json_uploaded": 0,
             "json_failed": 0,
             "image_queued": 0,
             "image_uploaded": 0,
-            "image_failed": 0
+            "image_failed": 0,
+            "pending_count": 0
         }
         
         self.uploaded_files = set()
@@ -315,7 +258,7 @@ class UploadQueue:
             self.running = True
             self.worker_thread = threading.Thread(target=self._worker, daemon=True)
             self.worker_thread.start()
-            logger.info("✓ Upload queue worker started")
+            logger.info("✓ Upload queue worker started (uploads paused during flight)")
     
     def stop(self):
         """Stop the background upload worker"""
@@ -324,19 +267,47 @@ class UploadQueue:
             self.worker_thread.join(timeout=5)
         logger.info("⚠ Upload queue worker stopped")
     
+    def enable_uploading(self):
+        """Enable uploading after flight completes"""
+        if not self.uploading_enabled:
+            self.uploading_enabled = True
+            logger.info("=" * 60)
+            logger.info("📤 UPLOAD ENABLED - Flight complete, starting uploads...")
+            logger.info("=" * 60)
+            
+            # Move all pending files to upload queue
+            for upload_type, file_path in self.pending_uploads:
+                self.upload_queue.put((upload_type, file_path))
+            
+            logger.info(f"✓ Queued {len(self.pending_uploads)} files for upload")
+            self.pending_uploads.clear()
+    
+    def disable_uploading(self):
+        """Disable uploading during flight"""
+        self.uploading_enabled = False
+        logger.info("⏸️  Upload paused - Flight in progress")
+    
     def add_json(self, json_path):
-        """Add JSON file to upload queue"""
+        """Add JSON file (will be held until flight ends)"""
         if str(json_path) not in self.uploaded_files:
-            self.upload_queue.put(("json", json_path))
-            self.stats["json_queued"] += 1
-            logger.debug(f"📥 Queued JSON: {Path(json_path).name}")
+            if self.uploading_enabled:
+                self.upload_queue.put(("json", json_path))
+                self.stats["json_queued"] += 1
+            else:
+                self.pending_uploads.append(("json", json_path))
+                self.stats["pending_count"] += 1
+            logger.debug(f"📥 Staged JSON: {Path(json_path).name}")
     
     def add_image(self, image_path):
-        """Add image file to upload queue"""
+        """Add image file (will be held until flight ends)"""
         if str(image_path) not in self.uploaded_files:
-            self.upload_queue.put(("image", image_path))
-            self.stats["image_queued"] += 1
-            logger.debug(f"📥 Queued image: {Path(image_path).name}")
+            if self.uploading_enabled:
+                self.upload_queue.put(("image", image_path))
+                self.stats["image_queued"] += 1
+            else:
+                self.pending_uploads.append(("image", image_path))
+                self.stats["pending_count"] += 1
+            logger.debug(f"📥 Staged image: {Path(image_path).name}")
     
     def _worker(self):
         """Background worker that processes upload queue"""
@@ -346,6 +317,11 @@ class UploadQueue:
         
         while self.running:
             try:
+                # Only process uploads if enabled
+                if not self.uploading_enabled:
+                    time.sleep(1)
+                    continue
+                
                 try:
                     upload_type, file_path = self.upload_queue.get(timeout=1.0)
                 except queue.Empty:
@@ -418,7 +394,7 @@ class UploadQueue:
             with open(json_path, "r") as f:
                 json_data = json.load(f)
             
-            url = f"{config.SERVER}/upload/json"
+            url = f"{config.SERVER}"
             response = requests.post(url, json=json_data, timeout=10)
             
             if response.status_code == 200:
@@ -447,6 +423,7 @@ class UploadQueue:
                 logger.error(f"⚠ Image file not found: {image_path}")
                 return False
             
+            # ⚠️ UPDATE THIS URL TO YOUR ACTUAL IMAGE UPLOAD ENDPOINT
             url = f"{config.SERVER}/upload/image"
             
             with open(image_file, "rb") as f:
@@ -476,7 +453,8 @@ class UploadQueue:
             **self.stats,
             "queue_size": self.upload_queue.qsize(),
             "failed_count": len(self.failed_uploads),
-            "uploaded_total": len(self.uploaded_files)
+            "uploaded_total": len(self.uploaded_files),
+            "pending_count": len(self.pending_uploads)
         }
     
     def print_stats(self):
@@ -488,6 +466,7 @@ class UploadQueue:
                     f"{stats['json_failed']} failed")
         logger.info(f"   Images: {stats['image_uploaded']}/{stats['image_queued']} uploaded, "
                     f"{stats['image_failed']} failed")
+        logger.info(f"   Pending (not yet uploaded): {stats['pending_count']}")
         logger.info(f"   Queue size: {stats['queue_size']}")
         logger.info(f"   Failed (retrying): {stats['failed_count']}")
         logger.info(f"   Total uploaded: {stats['uploaded_total']}")
@@ -508,32 +487,38 @@ def add_detection_to_flight(flight_id, waypoint, image_path, detections):
 
 
 def finalize_flight_summary(flight_id, total_waypoints):
-    """Generate and save comprehensive flight summary"""
+    """Generate and save comprehensive flight summary, then upload everything"""
+    # Save summary
     summary_path = flight_aggregator.save_flight_summary(flight_id, total_waypoints)
     if summary_path:
         upload_queue.add_json(summary_path)
+    
+    # Get all images for this flight
+    flight_images = flight_aggregator.get_flight_images(flight_id)
+    
+    logger.info(f"📦 Preparing to upload {len(flight_images)} images from flight {flight_id}")
+    
+    # Queue all flight images
+    for image_path in flight_images:
+        # Queue both original and detection images
+        upload_queue.add_image(image_path)
+        
+        # Check for corresponding detection image
+        detection_path = str(image_path).replace("pinyasuri_", "detection_")
+        if Path(detection_path).exists():
+            upload_queue.add_image(detection_path)
+    
+    # NOW ENABLE UPLOADING - this triggers all pending uploads
+    upload_queue.enable_uploading()
+    
     return summary_path
 
 
-def save_individual_upload(image_path, detections):
-    """Save individual upload entry and queue for upload"""
-    upload_path = save_upload_entry(image_path, detections)
-    if upload_path:
-        upload_queue.add_json(upload_path)
-    return upload_path
-
-
-def get_json_dir_for_today():
-    """Create and return JSON directory for today's date"""
-    date_str = datetime.now().strftime("%Y-%m-%d")
-    json_dir = config.JSON_DIR / date_str
-    json_dir.mkdir(parents=True, exist_ok=True)
-    return json_dir
-
-
 def queue_image_upload(image_path):
-    """Queue an image for upload"""
-    upload_queue.add_image(image_path)
+    """Stage an image for upload (will be held until flight ends)"""
+    # Don't actually queue yet - just log it
+    # Images will be uploaded via finalize_flight_summary
+    pass
 
 
 def start_upload_queue():
@@ -547,22 +532,31 @@ def stop_upload_queue():
     upload_queue.stop()
 
 
+def disable_uploads_during_flight():
+    """Disable uploads when flight starts"""
+    upload_queue.disable_uploading()
+
+
 def scan_and_queue_unuploaded_files():
     """Scan local directories for files that haven't been uploaded yet"""
-    logger.info("🔍 Scanning for unuploaded files...")
+    logger.info("🔍 Scanning for unuploaded files from previous flights...")
     
     json_files = list(config.JSON_DIR.glob("**/*.json"))
-    for json_file in json_files:
-        if str(json_file) not in upload_queue.uploaded_files:
-            upload_queue.add_json(json_file)
-    
     image_files = list(config.IMAGE_DIR.glob("**/*.jpg"))
-    for image_file in image_files:
-        if str(image_file) not in upload_queue.uploaded_files:
-            upload_queue.add_image(image_file)
     
-    stats = upload_queue.get_stats()
-    logger.info(f"✓ Found {stats['json_queued']} JSON + {stats['image_queued']} images to upload")
+    # Only queue if NOT currently in flight (uploading is enabled)
+    if upload_queue.uploading_enabled:
+        for json_file in json_files:
+            if "upload_history" not in str(json_file):
+                upload_queue.add_json(json_file)
+        
+        for image_file in image_files:
+            upload_queue.add_image(image_file)
+        
+        stats = upload_queue.get_stats()
+        logger.info(f"✓ Queued {stats['json_queued']} JSON + {stats['image_queued']} images from previous flights")
+    else:
+        logger.info("⏸️  Files found but uploads paused (will upload after flight)")
 
 
 # ============================================================================

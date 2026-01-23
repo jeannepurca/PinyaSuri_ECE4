@@ -21,7 +21,7 @@ def get_next_daily_flight_number():
     # Use file locking to prevent race conditions
     with open(DAILY_FLIGHT_FILE, "a+") as f:
         try:
-            fcntl.flock(f.fileno(), fcntl.LOCK_EX)  # Exclusive lock
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)  # Exclusive lock    
             f.seek(0)
             content = f.read().strip()
             

@@ -187,8 +187,8 @@ def handle_waypoint_capture(pixhawk, camera, classifier, metrics, waypoint, flig
                     logger
                 )
                 
-                # ✅ QUEUE IMAGE FOR UPLOAD
-                uploader.queue_image_upload(image_path)
+                # ❌ REMOVED - Don't queue during flight
+                # uploader.queue_image_upload(image_path)
                 
                 logger.info(f"  ✓ Frame {i+1}/{num_captures} captured "
                            f"(size: {Path(image_path).stat().st_size / 1024:.1f} KB)")
@@ -216,8 +216,8 @@ def handle_waypoint_capture(pixhawk, camera, classifier, metrics, waypoint, flig
                         
                         if detection_image_path:
                             logger.info(f"  ✓ Detection image saved: {Path(detection_image_path).name}")
-                            # ✅ QUEUE DETECTION IMAGE FOR UPLOAD
-                            uploader.queue_image_upload(detection_image_path)
+                            # ❌ REMOVED - Don't queue during flight
+                            # uploader.queue_image_upload(detection_image_path)
                         
                         # Log results (this also adds to flight aggregator)
                         log_detection_results(
@@ -277,7 +277,7 @@ def get_telemetry_dict(pixhawk):
 def handle_arm_state_change(pixhawk, metrics, was_armed, flight_number, captured_wp, logger):
     """Detect and handle arm/disarm transitions"""
     if pixhawk.armed and not was_armed:
-        # Just armed
+        # Just armed - DISABLE UPLOADS
         logger.info("=" * 60)
         logger.info(f"🛫 FLIGHT #{flight_number} - DRONE ARMED")
         logger.info("   Mission monitoring started.")
@@ -285,19 +285,23 @@ def handle_arm_state_change(pixhawk, metrics, was_armed, flight_number, captured
         metrics.start_flight()
         pixhawk.clear_waypoint_log()
         
+        # ✅ DISABLE UPLOADS DURING FLIGHT
+        uploader.disable_uploads_during_flight()
+        
         return True, flight_number
         
     elif not pixhawk.armed and was_armed:
-        # Just disarmed
+        # Just disarmed - UPLOAD EVERYTHING
         logger.info(f"🛬 FLIGHT #{flight_number} - DRONE DISARMED")
         metrics.end_flight()
         
-        # ✅ GENERATE AND UPLOAD FLIGHT SUMMARY
+        # ✅ GENERATE FLIGHT SUMMARY AND ENABLE UPLOADS
         total_waypoints = pixhawk.get_last_waypoint() if pixhawk else 0
         logger.info(">>> Generating flight summary...")
         summary_path = uploader.finalize_flight_summary(metrics.flight_id, total_waypoints)
         if summary_path:
-            logger.info(f"✓ Flight summary created and queued: {summary_path}")
+            logger.info(f"✓ Flight summary created")
+            logger.info(f"✓ All flight data queued for upload")
         
         captured_wp.clear()
         pixhawk.clear_waypoint_log()
