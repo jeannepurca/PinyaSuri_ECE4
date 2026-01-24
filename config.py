@@ -29,7 +29,7 @@ SERVER_BASE = "https://finalfinaledit-pinyasuri-webdev.onrender.com"
 
 # Separate endpoints for different data types
 FLIGHT_LOG_ENDPOINT = f"{SERVER_BASE}/api/upload-flight-log"
-IMAGE_UPLOAD_ENDPOINT = f"{SERVER_BASE}/api/save-upload-result"
+IMAGE_UPLOAD_ENDPOINT = f"{SERVER_BASE}/api/waypoint-image"
 
 # Legacy support (for backward compatibility)
 SERVER = FLIGHT_LOG_ENDPOINT
