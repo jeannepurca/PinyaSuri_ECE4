@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 # SERVER ENDPOINTS - UPDATE THESE TO MATCH YOUR ACTUAL API
 # ============================================================================
 FLIGHT_LOG_ENDPOINT = "https://finalfinaledit-pinyasuri-webdev.onrender.com/api/upload-flight-log"
-IMAGE_UPLOAD_ENDPOINT = "https://finalfinaledit-pinyasuri-webdev.onrender.com/api/upload-image"  # ⚠️ UPDATE THIS
+IMAGE_UPLOAD_ENDPOINT = "https://finalfinaledit-pinyasuri-webdev.onrender.com/api/save-upload-result"
 
 # ============================================================================
 # FLIGHT DATA AGGREGATOR
