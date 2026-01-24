@@ -186,7 +186,7 @@ def handle_waypoint_capture(pixhawk, camera, classifier, metrics, waypoint, flig
                     logger
                 )
                 
-                uploader.queue_image_upload(image_path)
+                # uploader.queue_image_upload(image_path)
                 
                 logger.info(f"  ✓ Frame {i+1}/{num_captures} captured "
                            f"(size: {Path(image_path).stat().st_size / 1024:.1f} KB)")
@@ -215,7 +215,7 @@ def handle_waypoint_capture(pixhawk, camera, classifier, metrics, waypoint, flig
                         if detection_image_path:
                             logger.info(f"  ✓ Detection image saved: {Path(detection_image_path).name}")
                             
-                            uploader.queue_image_upload(detection_image_path)
+                            # uploader.queue_image_upload(detection_image_path)
                         
                         # Log results (this also adds to flight aggregator)
                         log_detection_results(
