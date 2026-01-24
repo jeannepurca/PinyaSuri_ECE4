@@ -191,8 +191,8 @@ class FlightDataAggregator:
         
         # Format times
         date_str = flight['start_time'].strftime("%B %d, %Y") if flight['start_time'] else datetime.now().strftime("%B %d, %Y")
-        start_time_str = flight['start_time'].strftime("%H:%M") if flight['start_time'] else "00:00"
-        end_time_str = flight['end_time'].strftime("%H:%M") if flight['end_time'] else "00:00"
+        start_time_str = flight['start_time'].strftime("%H:%M:%S") if flight['start_time'] else "00:00"
+        end_time_str = flight['end_time'].strftime("%H:%M:%S") if flight['end_time'] else "00:00"
         
         # Build waypoint details with SERVER URLs
         waypoint_list = []
