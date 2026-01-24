@@ -15,7 +15,7 @@ from collections import defaultdict
 logger = logging.getLogger(__name__)
 
 # ============================================================================
-# SERVER ENDPOINTS - NOW USING SEPARATE URLs FROM CONFIG
+# SERVER ENDPOINTS
 # ============================================================================
 FLIGHT_LOG_ENDPOINT = config.FLIGHT_LOG_ENDPOINT
 IMAGE_UPLOAD_ENDPOINT = config.IMAGE_UPLOAD_ENDPOINT
@@ -53,7 +53,7 @@ class FlightDataAggregator:
         self.current_flight_id = flight_id
         flight = self.flights[flight_id]
         
-        # ✅ Set start time immediately
+        # Set start time immediately
         if flight['start_time'] is None:
             flight['start_time'] = datetime.now()
             flight['initialized'] = True
@@ -64,7 +64,7 @@ class FlightDataAggregator:
         """Add detection data for a specific waypoint image"""
         flight = self.flights[flight_id]
         
-        # ✅ Initialize flight if not already done (safety fallback)
+        # Initialize flight if not already done (safety fallback)
         if not flight['initialized']:
             logger.warning(f"⚠️  Late initialization of flight {flight_id}")
             flight['start_time'] = datetime.now()

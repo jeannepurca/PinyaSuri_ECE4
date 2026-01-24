@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# test_uploader.py - Test script for uploading JSON files AND images
+# test_uploader.py - Simplified test script with standard uploads only
 
 import json
 import requests
@@ -23,7 +23,7 @@ logging.basicConfig(
 )
 
 # ============================================================================
-# CONFIGURATION - NOW USES SEPARATE ENDPOINTS
+# CONFIGURATION
 # ============================================================================
 
 FLIGHT_LOG_ENDPOINT = config.FLIGHT_LOG_ENDPOINT
@@ -72,7 +72,7 @@ def upload_json_file(json_path):
         }
         logger.debug(f"   Preview: {preview}")
         
-        # ✅ Upload to FLIGHT LOG endpoint
+        # Upload to FLIGHT LOG endpoint
         logger.info(f"   → Endpoint: {FLIGHT_LOG_ENDPOINT}")
         response = requests.post(
             FLIGHT_LOG_ENDPOINT,
@@ -111,8 +111,8 @@ def upload_json_file(json_path):
         return False
 
 
-def upload_image_file(image_path, test_mode=True):
-    """Upload a single image file to the IMAGE UPLOAD endpoint"""
+def upload_image_file(image_path):
+    """Upload a single image file using standard multipart/form-data"""
     try:
         image_file = Path(image_path)
         
@@ -122,124 +122,54 @@ def upload_image_file(image_path, test_mode=True):
         
         file_size_mb = image_file.stat().st_size / (1024 * 1024)
         logger.info(f"📤 Uploading Image: {image_file.name} ({file_size_mb:.2f} MB)")
+        logger.info(f"   → Endpoint: {IMAGE_UPLOAD_ENDPOINT}")
         
-        if test_mode:
-            # Try different methods to find what works
-            logger.info("   🧪 Testing different upload methods...")
-            
-            # Method 1: multipart/form-data with field name "file"
-            logger.info("   Testing: multipart with field 'file'")
-            success, result = _try_upload_image(image_file, "file")
-            if success:
-                return True, result
-            
-            # Method 2: multipart/form-data with field name "image"
-            logger.info("   Testing: multipart with field 'image'")
-            success, result = _try_upload_image(image_file, "image")
-            if success:
-                return True, result
-            
-            # Method 3: Try as base64 in JSON
-            logger.info("   Testing: base64 in JSON")
-            success, result = _try_upload_image_base64(image_file)
-            if success:
-                return True, result
-            
-            logger.error(f"❌ IMAGE FAILED: All methods failed for {image_file.name}")
-            return False, None
-        else:
-            # Use standard multipart upload
-            return _try_upload_image(image_file, "file")
-            
-    except Exception as e:
-        logger.error(f"❌ Error uploading image {image_file.name}: {e}")
-        return False, None
-
-
-def _try_upload_image(image_file, field_name):
-    """Try uploading image as multipart/form-data to IMAGE endpoint"""
-    try:
+        # Standard multipart/form-data upload
         with open(image_file, "rb") as f:
-            files = {field_name: (image_file.name, f, "image/jpeg")}
-            
-            # ✅ USE DEDICATED IMAGE UPLOAD ENDPOINT
-            logger.info(f"   → Endpoint: {IMAGE_UPLOAD_ENDPOINT}")
+            files = {"file": (image_file.name, f, "image/jpeg")}
             response = requests.post(
                 IMAGE_UPLOAD_ENDPOINT,
                 files=files,
                 timeout=60
             )
-            
-            if response.status_code in [200, 201]:
-                logger.info(f"   ✅ SUCCESS with field '{field_name}'")
-                logger.info(f"      Status Code: {response.status_code}")
-                
-                try:
-                    response_data = response.json()
-                    logger.info(f"      Server response: {response_data}")
-                    
-                    # Look for image URL in response
-                    url_fields = ["url", "image_url", "file_url", "path", "image_path", "location", "file_path"]
-                    image_url = None
-                    for url_field in url_fields:
-                        if url_field in response_data:
-                            image_url = response_data[url_field]
-                            logger.info(f"      🎯 Image URL found in '{url_field}': {image_url}")
-                            break
-                    
-                    return True, {"url": image_url, "response": response_data}
-                except:
-                    logger.info(f"      Server response (text): {response.text[:200]}")
-                    return True, {"url": None, "response": response.text}
-            else:
-                logger.debug(f"      ❌ Failed with status {response.status_code}")
-                return False, None
-                
-    except Exception as e:
-        logger.debug(f"      ❌ Error: {e}")
-        return False, None
-
-
-def _try_upload_image_base64(image_file):
-    """Try uploading image as base64 string in JSON to IMAGE endpoint"""
-    try:
-        import base64
-        
-        with open(image_file, "rb") as f:
-            image_base64 = base64.b64encode(f.read()).decode('utf-8')
-        
-        json_data = {
-            "type": "image_upload",
-            "filename": image_file.name,
-            "image": f"data:image/jpeg;base64,{image_base64}"
-        }
-        
-        # ✅ USE DEDICATED IMAGE UPLOAD ENDPOINT
-        response = requests.post(
-            IMAGE_UPLOAD_ENDPOINT,
-            json=json_data,
-            headers={"Content-Type": "application/json"},
-            timeout=60
-        )
         
         if response.status_code in [200, 201]:
-            logger.info(f"   ✅ SUCCESS with base64 method")
-            logger.info(f"      Status Code: {response.status_code}")
+            logger.info(f"✅ IMAGE SUCCESS: {image_file.name}")
+            logger.info(f"   Status Code: {response.status_code}")
             
             try:
                 response_data = response.json()
-                logger.info(f"      Server response: {response_data}")
-                return True, {"url": None, "response": response_data}
+                logger.info(f"   Server response: {response_data}")
+                
+                # Look for image URL in response
+                url_fields = ["url", "image_url", "file_url", "path", "image_path", "location", "file_path"]
+                image_url = None
+                for url_field in url_fields:
+                    if url_field in response_data:
+                        image_url = response_data[url_field]
+                        logger.info(f"   🎯 Image URL: {image_url}")
+                        break
+                
+                return True, image_url
             except:
-                logger.info(f"      Server response (text): {response.text[:200]}")
-                return True, {"url": None, "response": response.text}
+                logger.info(f"   Server response (text): {response.text[:200]}")
+                return True, None
         else:
-            logger.debug(f"      ❌ Failed with status {response.status_code}")
+            logger.error(f"❌ IMAGE FAILED: {image_file.name}")
+            logger.error(f"   Status Code: {response.status_code}")
+            logger.error(f"   Response: {response.text[:500]}")
             return False, None
             
-    except Exception as e:
-        logger.debug(f"      ❌ Error: {e}")
+    except requests.exceptions.ConnectionError:
+        logger.error(f"❌ Connection Error: Cannot reach server")
         return False, None
+    except requests.exceptions.Timeout:
+        logger.error(f"❌ Timeout: Server took too long to respond")
+        return False, None
+    except Exception as e:
+        logger.error(f"❌ Error uploading image {image_file.name}: {e}")
+        return False, None
+
 
 # ============================================================================
 # FILE SCANNING
@@ -420,14 +350,14 @@ def upload_all_images():
     for i, image_file in enumerate(image_files, 1):
         logger.info(f"[{i}/{len(image_files)}] Processing: {image_file.name}")
         
-        success, result = upload_image_file(image_file, test_mode=True)
+        success, image_url = upload_image_file(image_file)
         
         if success:
             success_count += 1
-            if result and result.get("url"):
+            if image_url:
                 image_urls.append({
                     "filename": image_file.name,
-                    "url": result["url"]
+                    "url": image_url
                 })
         else:
             failed_count += 1
@@ -453,9 +383,9 @@ def upload_all_images():
 
 
 def upload_sample_image():
-    """Upload just one sample image to test the IMAGE endpoint"""
+    """Upload just one sample image to test the endpoint"""
     logger.info("="*60)
-    logger.info("🧪 UPLOADING SAMPLE IMAGE (TEST MODE)")
+    logger.info("🧪 UPLOADING SAMPLE IMAGE")
     logger.info(f"   Target: {IMAGE_UPLOAD_ENDPOINT}")
     logger.info("="*60)
     
@@ -483,21 +413,21 @@ def upload_sample_image():
         return
     
     print()
-    success, result = upload_image_file(sample_image, test_mode=True)
+    success, image_url = upload_image_file(sample_image)
     
     print()
     if success:
         logger.info("="*60)
         logger.info("✅ SAMPLE IMAGE UPLOAD SUCCESSFUL!")
-        if result and result.get("url"):
-            logger.info(f"📎 Image URL: {result['url']}")
+        if image_url:
+            logger.info(f"📎 Image URL: {image_url}")
         logger.info("="*60)
-        logger.info("\n💡 You can now use this same method for all images!")
+        logger.info("\n💡 You can now upload all images using option 2!")
     else:
         logger.info("="*60)
         logger.info("❌ SAMPLE IMAGE UPLOAD FAILED")
         logger.info("="*60)
-        logger.info("\n💡 Contact your webdev team for the correct image upload method")
+        logger.info("\n💡 Check your server configuration or contact your webdev team")
 
 
 def upload_specific_file(filepath):
@@ -518,7 +448,7 @@ def upload_specific_file(filepath):
         result = upload_json_file(file_path)
     elif file_path.suffix.lower() in ['.jpg', '.jpeg', '.png']:
         logger.info(f"   Target: {IMAGE_UPLOAD_ENDPOINT}")
-        result, _ = upload_image_file(file_path, test_mode=True)
+        result, _ = upload_image_file(file_path)
     else:
         logger.error(f"❌ Unsupported file type: {file_path.suffix}")
         return
@@ -601,7 +531,7 @@ def show_directory_info():
 
 if __name__ == "__main__":
     print("\n" + "="*60)
-    print("🧪 FILE UPLOADER TEST SCRIPT (SEPARATE ENDPOINTS)")
+    print("🧪 FILE UPLOADER TEST SCRIPT")
     print("="*60)
     print(f"\n📡 Configured Endpoints:")
     print(f"   JSON → {FLIGHT_LOG_ENDPOINT}")
@@ -610,10 +540,10 @@ if __name__ == "__main__":
     print(f"   JSON: {JSON_DIR}")
     print(f"   Images: {IMAGE_DIR}")
     print("="*60)
-    print("\nAvailable test modes:")
+    print("\nAvailable options:")
     print("  1. Upload all JSON files")
     print("  2. Upload all images")
-    print("  3. Upload sample image (test mode)")
+    print("  3. Upload sample image (test)")
     print("  4. List available files")
     print("  5. Upload specific file")
     print("  6. Test server connection only")
