@@ -11,12 +11,6 @@ logger = logging.getLogger(__name__)
 
 class Camera:
     def __init__(self, classifier=None):
-        """
-        Initialize camera
-        
-        Args:
-            classifier: Optional PinyaSuriAI instance for drawing bounding boxes
-        """
         config.ensure_directories()
         self.classifier = classifier
 
@@ -24,11 +18,9 @@ class Camera:
             from picamera2 import Picamera2
             self.picam2 = Picamera2()
             
-            # Use faster configuration optimized for burst capture
-            # Still uses high resolution but with faster processing
             cam_config = self.picam2.create_still_configuration(
                 main={"size": (4056, 3040)},
-                buffer_count=2  # Double buffering for faster captures
+                buffer_count=2
             )
             self.picam2.configure(cam_config)
             self.picam2.start()
@@ -51,7 +43,7 @@ class Camera:
 
         # Timestamp for filename
         ts = datetime.utcnow().strftime("%Y%m%dT%H%M%S%f")[:-3]
-        
+
         # Include burst index in filename
         filename = f"{prefix}_flight{flight_number}_wp{waypoint}_burst{burst_index}_{ts}.jpg"
         fullpath = date_folder / filename
@@ -67,20 +59,7 @@ class Camera:
 
     def save_detection_image(self, image_path, detections, waypoint: int, 
                             flight_number: int = 1, prefix="detection", burst_index=0):
-        """
-        Load captured image, draw bounding boxes, and save as new file
-        
-        Args:
-            image_path: Path to original captured image
-            detections: List of detection dictionaries from classifier
-            waypoint: Waypoint number
-            flight_number: Flight number
-            prefix: Filename prefix for detection image
-            burst_index: Burst image index
-            
-        Returns:
-            str: Path to saved detection image, or None if failed
-        """
+        """Load captured image, draw bounding boxes, and save as new file"""
         try:
             # Load the original image
             frame = cv2.imread(image_path)
@@ -135,16 +114,7 @@ class Camera:
             return None
 
     def _draw_bounding_boxes(self, frame, detections):
-        """
-        Draw bounding boxes and labels on frame (fallback method)
-        
-        Args:
-            frame: OpenCV BGR image
-            detections: List of detection dictionaries
-            
-        Returns:
-            Frame with bounding boxes drawn
-        """
+        """Draw bounding boxes and labels on frame"""
         for det in detections:
             # Get bounding box in pixels
             x1, y1, x2, y2 = det['bbox_pixels']

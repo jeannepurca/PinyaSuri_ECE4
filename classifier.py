@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# classifier.py - OBJECT DETECTION VERSION
+# classifier.py
 
 import logging
 import numpy as np
@@ -29,7 +29,7 @@ class PinyaSuriAI:
             self.input_height = self.input_shape[1]
             self.input_width = self.input_shape[2]
             
-            logger.info(f"✓ Object Detection Model loaded: {config.MODEL_PATH.name}")
+            logger.info(f"✓h Object Detection Model loaded: {config.MODEL_PATH.name}")
             logger.info(f"  Input shape: {self.input_shape}")
             logger.info(f"  Number of classes: {len(config.CLASS_NAMES)}")
             logger.info(f"  Detection threshold: {config.DETECTION_THRESHOLD}")
@@ -52,7 +52,6 @@ class PinyaSuriAI:
             # Resize to model input size
             resized = cv2.resize(rgb_frame, (self.input_width, self.input_height))
             
-            # YOLOv8 expects uint8 [0-255] or float32 [0-255]
             # Normalize to [0, 1] and convert to float32
             normalized = resized.astype(np.float32) / 255.0
             
@@ -66,11 +65,7 @@ class PinyaSuriAI:
             return None
 
     def detect(self, frame):
-        """
-        Detect multiple pineapples in a frame (YOLOv8 format)
-        
-        Returns: List of detections
-        """
+        """Detect multiple pineapples in a frame (YOLOv8 format)"""
         try:
             frame_height, frame_width = frame.shape[:2]
             
@@ -114,7 +109,6 @@ class PinyaSuriAI:
                 
                 class_name = config.get_class_name(class_idx)
                 
-                # YOLOv8 coordinates are already normalized [0, 1] relative to input size
                 # Convert from center format to corner format
                 xmin = (x_center - width / 2) / self.input_width
                 ymin = (y_center - height / 2) / self.input_height
@@ -154,15 +148,7 @@ class PinyaSuriAI:
             return []
         
     def detect_with_nms(self, frame, iou_threshold=0.5):
-        """
-        Detect with Non-Maximum Suppression to remove overlapping boxes
-        
-        Args:
-            frame: Input image
-            iou_threshold: IoU threshold for NMS (default 0.5)
-        
-        Returns: Filtered list of detections
-        """
+        """Detect with Non-Maximum Suppression to remove overlapping boxes"""
         detections = self.detect(frame)
         
         if len(detections) <= 1:
@@ -183,12 +169,14 @@ class PinyaSuriAI:
     
     def _nms(self, boxes, scores, iou_threshold):
         """Simple Non-Maximum Suppression implementation"""
+
         # Sort by score
         sorted_indices = np.argsort(scores)[::-1]
         
         keep = []
         
         while len(sorted_indices) > 0:
+
             # Pick box with highest score
             current = sorted_indices[0]
             keep.append(current)
@@ -229,16 +217,7 @@ class PinyaSuriAI:
         return iou
 
     def draw_bounding_boxes(self, frame, detections):
-        """
-        Draw bounding boxes and labels on frame (public method for testing)
-        
-        Args:
-            frame: OpenCV BGR image
-            detections: List of detection dictionaries
-            
-        Returns:
-            Frame with bounding boxes drawn
-        """
+        """Draw bounding boxes and labels on frame"""
         for det in detections:
             # Get bounding box in pixels
             x1, y1, x2, y2 = det['bbox_pixels']

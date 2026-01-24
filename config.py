@@ -4,7 +4,6 @@
 from pathlib import Path
 from datetime import datetime
 
-
 # ============================================================================  
 # BASE DIRECTORIES  
 # ============================================================================  
@@ -145,4 +144,4 @@ CLASS_COLORS = {
 
 def get_class_color(index: int):
     """Get color for a specific class index"""
-    return CLASS_COLORS.get(index, (255, 255, 255))  # Default: white
+    return CLASS_COLORS.get(index, (255, 255, 255))
