@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# camera.py
+# camera.py - Modified to save cropped images
 
 import logging
 import pathlib
@@ -56,18 +56,46 @@ class Camera:
         except Exception as e:
             logger.error(f"⚠ Failed to capture {filename}: {e}")
             raise
-
-    def save_detection_image(self, image_path, detections, waypoint: int, 
-                            flight_number: int = 1, prefix="detection", burst_index=0):
-        """Load captured image, draw bounding boxes, and save as new file"""
+    
+    def save_cropped_image(self, cropped_frame, waypoint: int, 
+                          flight_number: int = 1, prefix="cropped", burst_index=0):
+        """Save the cropped square image (from classifier)"""
         try:
-            # Load the original image
-            frame = cv2.imread(image_path)
-            if frame is None:
-                logger.error(f"⚠ Failed to load image: {image_path}")
+            # Get today's folder
+            date_folder = config.get_image_day_dir()
+
+            # Timestamp for filename
+            ts = datetime.utcnow().strftime("%Y%m%dT%H%M%S%f")[:-3]
+            
+            # Create filename for cropped image
+            filename = f"{prefix}_flight{flight_number}_wp{waypoint}_burst{burst_index}_{ts}.jpg"
+            fullpath = date_folder / filename
+
+            # Save cropped image
+            success = cv2.imwrite(str(fullpath), cropped_frame)
+            
+            if success:
+                logger.debug(f"✓ Saved cropped image: {filename}")
+                return str(fullpath)
+            else:
+                logger.error(f"⚠ cv2.imwrite failed for: {filename}")
+                return None
+            
+        except Exception as e:
+            logger.error(f"⚠ Failed to save cropped image: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return None
+
+    def save_detection_image(self, cropped_frame, detections, waypoint: int, 
+                            flight_number: int = 1, prefix="detection", burst_index=0):
+        """Draw bounding boxes on CROPPED frame and save"""
+        try:
+            if cropped_frame is None:
+                logger.error(f"⚠ No cropped frame provided")
                 return None
 
-            logger.debug(f"Loaded image shape: {frame.shape}")
+            logger.debug(f"Cropped frame shape: {cropped_frame.shape}")
             logger.debug(f"Number of detections: {len(detections)}")
 
             # Get today's folder
@@ -79,6 +107,9 @@ class Camera:
             # Create filename for detection image
             filename = f"{prefix}_flight{flight_number}_wp{waypoint}_burst{burst_index}_{ts}.jpg"
             fullpath = date_folder / filename
+
+            # Make a copy to draw on
+            frame = cropped_frame.copy()
 
             # Draw bounding boxes if enabled and detections exist
             if config.DRAW_BBOXES and detections:

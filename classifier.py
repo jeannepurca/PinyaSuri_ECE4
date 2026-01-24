@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# classifier.py
+# classifier.py - Modified to return cropped image
 
 import logging
 import numpy as np
@@ -32,8 +32,9 @@ class PinyaSuriAI:
             # Track crop info for bbox adjustment
             self.last_crop_offset = (0, 0)
             self.last_crop_size = 0
+            self.last_cropped_frame = None  # NEW: Store the cropped frame (BGR)
             
-            logger.info(f"✓ Object Detection Model loaded: {config.MODEL_PATH.name}")  # Fixed typo
+            logger.info(f"✓ Object Detection Model loaded: {config.MODEL_PATH.name}")
             logger.info(f"  Input shape: {self.input_shape}")
             logger.info(f"  Number of classes: {len(config.CLASS_NAMES)}")
             logger.info(f"  Detection threshold: {config.DETECTION_THRESHOLD}")
@@ -76,6 +77,9 @@ class PinyaSuriAI:
             self.last_crop_offset = (0, 0)
             self.last_crop_size = w
         
+        # ✅ NEW: Store cropped frame in BGR for later use
+        self.last_cropped_frame = cv2.cvtColor(cropped, cv2.COLOR_RGB2BGR)
+        
         # Now resize square to model input (no distortion!)
         resized = cv2.resize(cropped, (self.input_width, self.input_height))
         
@@ -84,13 +88,17 @@ class PinyaSuriAI:
         input_data = np.expand_dims(normalized, axis=0)
         
         return input_data
+    
+    def get_cropped_frame(self):
+        """Get the last cropped frame (BGR format, ready to save)"""
+        return self.last_cropped_frame
 
     def detect(self, frame):
         """Detect multiple pineapples in a frame (YOLOv8 format)"""
         try:
             frame_height, frame_width = frame.shape[:2]
             
-            # Preprocess (also stores crop info)
+            # Preprocess (also stores crop info AND cropped frame)
             input_data = self.preprocess_frame(frame)
             if input_data is None:
                 return []
@@ -140,30 +148,25 @@ class PinyaSuriAI:
                 xmax = max(0.0, min(1.0, xmax))
                 ymax = max(0.0, min(1.0, ymax))
                 
-                # Convert to pixel coordinates in CROPPED space
-                x1_crop = int(xmin * self.last_crop_size)
-                y1_crop = int(ymin * self.last_crop_size)
-                x2_crop = int(xmax * self.last_crop_size)
-                y2_crop = int(ymax * self.last_crop_size)
+                # ✅ UPDATED: Convert to pixel coordinates in CROPPED space
+                # (bbox_pixels now refers to the cropped image, not original)
+                x1_px = int(xmin * self.last_crop_size)
+                y1_px = int(ymin * self.last_crop_size)
+                x2_px = int(xmax * self.last_crop_size)
+                y2_px = int(ymax * self.last_crop_size)
                 
-                # Adjust for crop offset to get ORIGINAL frame coordinates
-                x1_px = x1_crop + self.last_crop_offset[0]
-                y1_px = y1_crop + self.last_crop_offset[1]
-                x2_px = x2_crop + self.last_crop_offset[0]
-                y2_px = y2_crop + self.last_crop_offset[1]
-                
-                # Clamp to original frame bounds
-                x1_px = max(0, min(frame_width, x1_px))
-                y1_px = max(0, min(frame_height, y1_px))
-                x2_px = max(0, min(frame_width, x2_px))
-                y2_px = max(0, min(frame_height, y2_px))
+                # Clamp to cropped frame bounds
+                x1_px = max(0, min(self.last_crop_size, x1_px))
+                y1_px = max(0, min(self.last_crop_size, y1_px))
+                x2_px = max(0, min(self.last_crop_size, x2_px))
+                y2_px = max(0, min(self.last_crop_size, y2_px))
                 
                 detection = {
                     'class_index': class_idx,
                     'class_name': class_name,
                     'confidence': confidence,
                     'bbox': (xmin, ymin, xmax, ymax),  # normalized
-                    'bbox_pixels': (x1_px, y1_px, x2_px, y2_px)  # pixels in original frame
+                    'bbox_pixels': (x1_px, y1_px, x2_px, y2_px)  # pixels in CROPPED frame
                 }
                 
                 detections.append(detection)

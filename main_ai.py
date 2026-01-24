@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# main_ai.py - FIXED: Proper flight ID tracking
+# main_ai.py - FIXED: Proper indentation for cropped image saving
 
 import time
 import csv
@@ -209,6 +209,7 @@ def handle_waypoint_capture(pixhawk, camera, classifier, metrics, waypoint, flig
 
     logger.info(f"📸 Starting burst capture with AI detection ({num_captures} frames)...")
 
+    # ✅ FIXED INDENTATION: This for loop must be indented inside the function
     for i in range(num_captures):
         pixhawk.update()
         if pixhawk.mode != "AUTO":
@@ -222,54 +223,83 @@ def handle_waypoint_capture(pixhawk, camera, classifier, metrics, waypoint, flig
             return len(burst_results) > 0
         
         try:
-            # Capture original image
-            image_path = camera.capture(
+            # ✅ Capture original image (temporary - will be replaced by cropped)
+            temp_image_path = camera.capture(
                 waypoint=waypoint,
                 flight_number=flight_number,
-                prefix="pinyasuri",
+                prefix="temp",  # Mark as temporary
                 burst_index=i
             )
             
             # Verify file
-            if Path(image_path).exists() and Path(image_path).stat().st_size > 1000:
+            if Path(temp_image_path).exists() and Path(temp_image_path).stat().st_size > 1000:
                 
-                # Log image capture to CSV
-                log_image_capture(
-                    metrics.flight_id, 
-                    flight_number, 
-                    waypoint, 
-                    pixhawk.position,
-                    burst_id,
-                    i,
-                    image_path, 
-                    logger
-                )
-                
-                logger.info(f"  ✓ Frame {i+1}/{num_captures} captured "
-                           f"(size: {Path(image_path).stat().st_size / 1024:.1f} KB)")
+                logger.info(f"  ✓ Frame {i+1}/{num_captures} captured")
                 
                 # Run AI detection
                 try:
                     import cv2
                     
-                    # Load image
-                    frame = cv2.imread(image_path)
+                    # Load temporary image
+                    frame = cv2.imread(temp_image_path)
                     
                     if frame is not None:
-                        # Run detection with NMS
+                        # Run detection with NMS (this also creates cropped frame)
                         detections = classifier.detect_with_nms(frame, iou_threshold=config.NMS_IOU_THRESHOLD)
                         
-                        # Calculate image sharpness
-                        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                        # ✅ GET THE CROPPED FRAME from classifier
+                        cropped_frame = classifier.get_cropped_frame()
+                        
+                        if cropped_frame is None:
+                            logger.error(f"  ⚠️ Failed to get cropped frame")
+                            continue
+                        
+                        # ✅ SAVE THE CROPPED IMAGE (this is our main image now)
+                        image_path = camera.save_cropped_image(
+                            cropped_frame,
+                            waypoint=waypoint,
+                            flight_number=flight_number,
+                            prefix="pinyasuri",  # Main prefix
+                            burst_index=i
+                        )
+                        
+                        if not image_path:
+                            logger.error(f"  ⚠️ Failed to save cropped image")
+                            continue
+                        
+                        # Delete the temporary full-size image
+                        try:
+                            Path(temp_image_path).unlink()
+                            logger.debug(f"  ✓ Deleted temporary image")
+                        except Exception as e:
+                            logger.debug(f"  ⚠️ Could not delete temp image: {e}")
+                        
+                        # Calculate image sharpness on cropped frame
+                        gray = cv2.cvtColor(cropped_frame, cv2.COLOR_BGR2GRAY)
                         sharpness = cv2.Laplacian(gray, cv2.CV_64F).var()
+                        
+                        # Log image capture to CSV with CROPPED image path
+                        log_image_capture(
+                            metrics.flight_id, 
+                            flight_number, 
+                            waypoint, 
+                            pixhawk.position,
+                            burst_id,
+                            i,
+                            image_path,  # Now points to cropped image
+                            logger
+                        )
+                        
+                        logger.info(f"  ✓ Cropped image saved: {Path(image_path).name}")
+                        logger.info(f"     Size: {cropped_frame.shape[1]}x{cropped_frame.shape[0]} (square)")
                         
                         # Store result for later selection
                         burst_results.append({
-                            'image_path': image_path,
+                            'image_path': image_path,  # Cropped image path
                             'detections': detections,
                             'sharpness': sharpness,
                             'frame_index': i,
-                            'frame': frame  # Keep frame in memory for detection image
+                            'cropped_frame': cropped_frame  # Keep cropped frame in memory
                         })
                         
                         # Log summary for this frame
@@ -296,6 +326,7 @@ def handle_waypoint_capture(pixhawk, camera, classifier, metrics, waypoint, flig
 
     # ============================================================
     # SELECT BEST FRAME AFTER BURST COMPLETE
+    # ✅ FIXED INDENTATION: This section must be at the same level as the for loop
     # ============================================================
     if burst_results:
         logger.info("=" * 60)
@@ -320,9 +351,9 @@ def handle_waypoint_capture(pixhawk, camera, classifier, metrics, waypoint, flig
             # Queue ONLY the best image for upload
             uploader.queue_image_upload(best_image_path)
             
-            # Save detection image for best frame
+            # ✅ Save detection image using CROPPED frame
             detection_image_path = camera.save_detection_image(
-                best_image_path,  # Use renamed path
+                best_result['cropped_frame'],  # Use cropped frame, not path
                 best_result['detections'],
                 waypoint,
                 flight_number,
@@ -341,7 +372,7 @@ def handle_waypoint_capture(pixhawk, camera, classifier, metrics, waypoint, flig
                 waypoint,
                 burst_id,
                 best_result['frame_index'],
-                best_image_path,  # Use renamed path
+                best_image_path,  # Use renamed cropped path
                 best_result['detections'],
                 logger
             )
