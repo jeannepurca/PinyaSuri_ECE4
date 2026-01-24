@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# main_ai.py - Integrated with uploader.py
+# main_ai.py - FIXED: Proper flight ID tracking
 
 import time
 import csv
@@ -186,8 +186,6 @@ def handle_waypoint_capture(pixhawk, camera, classifier, metrics, waypoint, flig
                     logger
                 )
                 
-                # uploader.queue_image_upload(image_path)
-                
                 logger.info(f"  ✓ Frame {i+1}/{num_captures} captured "
                            f"(size: {Path(image_path).stat().st_size / 1024:.1f} KB)")
                 
@@ -214,12 +212,10 @@ def handle_waypoint_capture(pixhawk, camera, classifier, metrics, waypoint, flig
                         
                         if detection_image_path:
                             logger.info(f"  ✓ Detection image saved: {Path(detection_image_path).name}")
-                            
-                            # uploader.queue_image_upload(detection_image_path)
                         
-                        # Log results (this also adds to flight aggregator)
+                        # ✅ CRITICAL: Log results with CURRENT flight_id
                         log_detection_results(
-                            metrics.flight_id,
+                            metrics.flight_id,  # Use current flight_id from metrics
                             flight_number,
                             waypoint,
                             burst_id,
@@ -275,26 +271,36 @@ def get_telemetry_dict(pixhawk):
 def handle_arm_state_change(pixhawk, metrics, was_armed, flight_number, captured_wp, logger):
     """Detect and handle arm/disarm transitions"""
     if pixhawk.armed and not was_armed:
-        # Just armed - DISABLE UPLOADS
+        # Just armed - START NEW FLIGHT
         logger.info("=" * 60)
         logger.info(f"🛫 FLIGHT #{flight_number} - DRONE ARMED")
         logger.info("   Mission monitoring started.")
         logger.info("=" * 60)
         metrics.start_flight()
-        pixhawk.clear_waypoint_log()
         
+        # ✅ CRITICAL: Tell uploader about the new flight
+        uploader.start_new_flight(metrics.flight_id)
+        
+        pixhawk.clear_waypoint_log()
         uploader.disable_uploads_during_flight()
         
         return True, flight_number
         
     elif not pixhawk.armed and was_armed:
-        # Just disarmed - UPLOAD EVERYTHING
+        # Just disarmed - END CURRENT FLIGHT
         logger.info(f"🛬 FLIGHT #{flight_number} - DRONE DISARMED")
+        
+        # ✅ CRITICAL: Get flight_id BEFORE ending flight
+        current_flight_id = metrics.flight_id
+        
         metrics.end_flight()
         
         total_waypoints = pixhawk.get_last_waypoint() if pixhawk else 0
         logger.info(">>> Generating flight summary...")
-        summary_path = uploader.finalize_flight_summary(metrics.flight_id, total_waypoints)
+        
+        # ✅ Use the flight_id from WHEN THE FLIGHT WAS ACTIVE
+        summary_path = uploader.finalize_flight_summary(current_flight_id, total_waypoints)
+        
         if summary_path:
             logger.info(f"✓ Flight summary created.")
             logger.info(f"✓ All flight data queued for upload.")
@@ -484,12 +490,19 @@ def cleanup(camera, pixhawk, metrics, was_armed, logger):
 
     if was_armed:
         logger.info(">>> Finalizing flight metrics...")
+        
+        # ✅ CRITICAL: Get flight_id BEFORE ending flight
+        current_flight_id = metrics.flight_id
+        
         metrics.end_flight()
         
-        # ✅ Generate flight summary JSON
+        # Generate flight summary JSON
         total_waypoints = pixhawk.get_last_waypoint() if pixhawk else 0
         logger.info(">>> Generating flight summary...")
-        summary_path = uploader.finalize_flight_summary(metrics.flight_id, total_waypoints)
+        
+        # ✅ Use the flight_id from when flight was active
+        summary_path = uploader.finalize_flight_summary(current_flight_id, total_waypoints)
+        
         if summary_path:
             logger.info(f"✓ Flight summary created: {summary_path}")
 
@@ -507,7 +520,7 @@ def cleanup(camera, pixhawk, metrics, was_armed, logger):
     except Exception as e:
         logger.warning(f"⚠ Error closing Pixhawk: {e} ⚠")
 
-    # ✅ STOP UPLOAD QUEUE AND PRINT STATS
+    # STOP UPLOAD QUEUE AND PRINT STATS
     uploader.stop_upload_queue()
     logger.info("✓ Shutdown complete.")
 
@@ -517,10 +530,10 @@ def main():
     logger = setup_logging()
     logger.setLevel(logging.INFO)
     
-    # ✅ START UPLOAD QUEUE
+    # START UPLOAD QUEUE
     uploader.start_upload_queue()
     
-    # ✅ SCAN FOR UNUPLOADED FILES FROM PREVIOUS RUNS
+    # SCAN FOR UNUPLOADED FILES FROM PREVIOUS RUNS
     uploader.scan_and_queue_unuploaded_files()
     
     pixhawk = Pixhawk()

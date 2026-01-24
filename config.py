@@ -22,6 +22,20 @@ def ensure_directories():
 
 
 # ============================================================================  
+# API ENDPOINTS
+# ============================================================================  
+# Base server URL
+SERVER_BASE = "https://finalfinaledit-pinyasuri-webdev.onrender.com"
+
+# Separate endpoints for different data types
+FLIGHT_LOG_ENDPOINT = f"{SERVER_BASE}/api/upload-flight-log"
+IMAGE_UPLOAD_ENDPOINT = f"{SERVER_BASE}/api/save-upload-result"
+
+# Legacy support (for backward compatibility)
+SERVER = FLIGHT_LOG_ENDPOINT
+
+
+# ============================================================================  
 # FLIGHT LOG FILES  
 # ============================================================================  
 def get_flight_log_file():
@@ -109,9 +123,8 @@ BURST_INTERVAL = 0.5  # Seconds between captures
 # ============================================================================  
 # AI CONFIGURATION  
 # ============================================================================  
-SERVER = "https://finalfinaledit-pinyasuri-webdev.onrender.com/api/upload-flight-log"
 MODEL_PATH = MODEL_DIR / "YOLOv8n_PinyaSuri_AI.tflite"
-DETECTION_THRESHOLD = 0.7
+DETECTION_THRESHOLD = 0.6
 
 CLASS_NAMES = {
     0: "Crown Rot Disease",

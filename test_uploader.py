@@ -23,26 +23,33 @@ logging.basicConfig(
 )
 
 # ============================================================================
-# CONFIGURATION
+# CONFIGURATION - NOW USES SEPARATE ENDPOINTS
 # ============================================================================
 
-SERVER_URL = config.SERVER
+FLIGHT_LOG_ENDPOINT = config.FLIGHT_LOG_ENDPOINT
+IMAGE_UPLOAD_ENDPOINT = config.IMAGE_UPLOAD_ENDPOINT
 JSON_DIR = config.JSON_DIR
 IMAGE_DIR = config.IMAGE_DIR
 
 # Ensure directories exist
 config.ensure_directories()
 
+logger.info("=" * 60)
+logger.info("📡 SERVER ENDPOINTS")
+logger.info("=" * 60)
+logger.info(f"📄 Flight Log (JSON): {FLIGHT_LOG_ENDPOINT}")
+logger.info(f"🖼️  Image Upload: {IMAGE_UPLOAD_ENDPOINT}")
+logger.info("=" * 60)
 logger.info(f"📂 JSON Directory: {JSON_DIR}")
 logger.info(f"📂 Image Directory: {IMAGE_DIR}")
-logger.info(f"🌐 Server URL: {SERVER_URL}")
+logger.info("=" * 60)
 
 # ============================================================================
 # UPLOAD FUNCTIONS
 # ============================================================================
 
 def upload_json_file(json_path):
-    """Upload a single JSON file to the server"""
+    """Upload a single JSON file to the FLIGHT LOG endpoint"""
     try:
         json_file = Path(json_path)
         
@@ -65,9 +72,10 @@ def upload_json_file(json_path):
         }
         logger.debug(f"   Preview: {preview}")
         
-        # Upload to server
+        # ✅ Upload to FLIGHT LOG endpoint
+        logger.info(f"   → Endpoint: {FLIGHT_LOG_ENDPOINT}")
         response = requests.post(
-            SERVER_URL,
+            FLIGHT_LOG_ENDPOINT,
             json=json_data,
             timeout=30,
             headers={"Content-Type": "application/json"}
@@ -104,7 +112,7 @@ def upload_json_file(json_path):
 
 
 def upload_image_file(image_path, test_mode=True):
-    """Upload a single image file to the server"""
+    """Upload a single image file to the IMAGE UPLOAD endpoint"""
     try:
         image_file = Path(image_path)
         
@@ -149,13 +157,15 @@ def upload_image_file(image_path, test_mode=True):
 
 
 def _try_upload_image(image_file, field_name):
-    """Try uploading image as multipart/form-data"""
+    """Try uploading image as multipart/form-data to IMAGE endpoint"""
     try:
         with open(image_file, "rb") as f:
             files = {field_name: (image_file.name, f, "image/jpeg")}
             
+            # ✅ USE DEDICATED IMAGE UPLOAD ENDPOINT
+            logger.info(f"   → Endpoint: {IMAGE_UPLOAD_ENDPOINT}")
             response = requests.post(
-                SERVER_URL,
+                IMAGE_UPLOAD_ENDPOINT,
                 files=files,
                 timeout=60
             )
@@ -191,7 +201,7 @@ def _try_upload_image(image_file, field_name):
 
 
 def _try_upload_image_base64(image_file):
-    """Try uploading image as base64 string in JSON"""
+    """Try uploading image as base64 string in JSON to IMAGE endpoint"""
     try:
         import base64
         
@@ -204,8 +214,9 @@ def _try_upload_image_base64(image_file):
             "image": f"data:image/jpeg;base64,{image_base64}"
         }
         
+        # ✅ USE DEDICATED IMAGE UPLOAD ENDPOINT
         response = requests.post(
-            SERVER_URL,
+            IMAGE_UPLOAD_ENDPOINT,
             json=json_data,
             headers={"Content-Type": "application/json"},
             timeout=60
@@ -271,28 +282,41 @@ def find_image_files():
 # ============================================================================
 
 def test_server_connection():
-    """Test if server is reachable"""
+    """Test if both endpoints are reachable"""
     logger.info("="*60)
-    logger.info("🔍 Testing server connection...")
-    logger.info(f"   Server URL: {SERVER_URL}")
+    logger.info("🔍 Testing server connections...")
+    logger.info("="*60)
     
-    try:
-        base_url = SERVER_URL.split('/api')[0] if '/api' in SERVER_URL else SERVER_URL
-        response = requests.get(base_url, timeout=10)
-        logger.info(f"✅ Server is reachable (Status: {response.status_code})")
-        return True
-    except requests.exceptions.ConnectionError:
-        logger.error(f"❌ Cannot connect to server")
-        return False
-    except Exception as e:
-        logger.warning(f"⚠️  Server test inconclusive: {e}")
-        return True
+    endpoints = {
+        "Flight Log (JSON)": FLIGHT_LOG_ENDPOINT,
+        "Image Upload": IMAGE_UPLOAD_ENDPOINT
+    }
+    
+    all_ok = True
+    
+    for name, endpoint in endpoints.items():
+        try:
+            base_url = endpoint.split('/api')[0] if '/api' in endpoint else endpoint
+            response = requests.get(base_url, timeout=10)
+            logger.info(f"✅ {name}: Reachable (Status: {response.status_code})")
+            logger.info(f"   URL: {endpoint}")
+        except requests.exceptions.ConnectionError:
+            logger.error(f"❌ {name}: Cannot connect")
+            logger.error(f"   URL: {endpoint}")
+            all_ok = False
+        except Exception as e:
+            logger.warning(f"⚠️  {name}: Test inconclusive ({e})")
+            logger.info(f"   URL: {endpoint}")
+    
+    logger.info("="*60)
+    return all_ok
 
 
 def upload_all_json_files():
-    """Find and upload all JSON files"""
+    """Find and upload all JSON files to FLIGHT LOG endpoint"""
     logger.info("="*60)
     logger.info("🚀 UPLOADING ALL JSON FILES")
+    logger.info(f"   Target: {FLIGHT_LOG_ENDPOINT}")
     logger.info("="*60)
     
     test_server_connection()
@@ -350,9 +374,10 @@ def upload_all_json_files():
 
 
 def upload_all_images():
-    """Find and upload all images"""
+    """Find and upload all images to IMAGE UPLOAD endpoint"""
     logger.info("="*60)
     logger.info("🚀 UPLOADING ALL IMAGES")
+    logger.info(f"   Target: {IMAGE_UPLOAD_ENDPOINT}")
     logger.info("="*60)
     
     test_server_connection()
@@ -428,9 +453,10 @@ def upload_all_images():
 
 
 def upload_sample_image():
-    """Upload just one sample image to test the endpoint"""
+    """Upload just one sample image to test the IMAGE endpoint"""
     logger.info("="*60)
     logger.info("🧪 UPLOADING SAMPLE IMAGE (TEST MODE)")
+    logger.info(f"   Target: {IMAGE_UPLOAD_ENDPOINT}")
     logger.info("="*60)
     
     image_files = find_image_files()
@@ -475,7 +501,7 @@ def upload_sample_image():
 
 
 def upload_specific_file(filepath):
-    """Upload a specific file (JSON or Image)"""
+    """Upload a specific file (JSON or Image) to the appropriate endpoint"""
     logger.info("="*60)
     logger.info("📤 UPLOADING SPECIFIC FILE")
     logger.info("="*60)
@@ -486,10 +512,12 @@ def upload_specific_file(filepath):
         logger.error(f"❌ File not found: {filepath}")
         return
     
-    # Determine file type
+    # Determine file type and endpoint
     if file_path.suffix.lower() == '.json':
+        logger.info(f"   Target: {FLIGHT_LOG_ENDPOINT}")
         result = upload_json_file(file_path)
     elif file_path.suffix.lower() in ['.jpg', '.jpeg', '.png']:
+        logger.info(f"   Target: {IMAGE_UPLOAD_ENDPOINT}")
         result, _ = upload_image_file(file_path, test_mode=True)
     else:
         logger.error(f"❌ Unsupported file type: {file_path.suffix}")
@@ -514,6 +542,7 @@ def list_available_files():
     # List JSON files
     json_files = find_json_files()
     logger.info(f"\n📄 JSON Files ({len(json_files)}):")
+    logger.info(f"   → Will upload to: {FLIGHT_LOG_ENDPOINT}")
     if json_files:
         for i, json_file in enumerate(json_files, 1):
             rel_path = json_file.relative_to(JSON_DIR) if json_file.is_relative_to(JSON_DIR) else json_file
@@ -524,6 +553,7 @@ def list_available_files():
     # List image files
     image_files = find_image_files()
     logger.info(f"\n🖼️  Images ({len(image_files)}):")
+    logger.info(f"   → Will upload to: {IMAGE_UPLOAD_ENDPOINT}")
     if image_files:
         for i, img_file in enumerate(image_files[:10], 1):
             logger.info(f"   [{i}] {img_file.name}")
@@ -538,11 +568,16 @@ def list_available_files():
 
 
 def show_directory_info():
-    """Show information about configured directories"""
+    """Show information about configured directories and endpoints"""
     logger.info("="*60)
-    logger.info("📂 DIRECTORY INFORMATION")
+    logger.info("📂 CONFIGURATION INFORMATION")
     logger.info("="*60)
     
+    logger.info("\n🌐 API Endpoints:")
+    logger.info(f"   Flight Logs (JSON): {FLIGHT_LOG_ENDPOINT}")
+    logger.info(f"   Images: {IMAGE_UPLOAD_ENDPOINT}")
+    
+    logger.info("\n📂 Directories:")
     dirs = {
         "Base Directory": config.BASE_DIR,
         "JSON/Results": config.JSON_DIR,
@@ -566,12 +601,14 @@ def show_directory_info():
 
 if __name__ == "__main__":
     print("\n" + "="*60)
-    print("🧪 FILE UPLOADER TEST SCRIPT")
+    print("🧪 FILE UPLOADER TEST SCRIPT (SEPARATE ENDPOINTS)")
     print("="*60)
+    print(f"\n📡 Configured Endpoints:")
+    print(f"   JSON → {FLIGHT_LOG_ENDPOINT}")
+    print(f"   Images → {IMAGE_UPLOAD_ENDPOINT}")
     print(f"\n📂 Using directories from config.py")
     print(f"   JSON: {JSON_DIR}")
     print(f"   Images: {IMAGE_DIR}")
-    print(f"\n🌐 Server: {SERVER_URL}")
     print("="*60)
     print("\nAvailable test modes:")
     print("  1. Upload all JSON files")
@@ -580,7 +617,7 @@ if __name__ == "__main__":
     print("  4. List available files")
     print("  5. Upload specific file")
     print("  6. Test server connection only")
-    print("  7. Show directory information")
+    print("  7. Show configuration information")
     print("="*60)
     
     try:
