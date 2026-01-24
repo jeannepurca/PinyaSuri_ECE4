@@ -116,7 +116,7 @@ STABILIZATION_DELAY = 2  # seconds
 # ============================================================================  
 # BURST CAPTURE CONFIGURATION  
 # ============================================================================  
-BURST_CAPTURE_COUNT = 5  # Number of images per waypoint
+BURST_CAPTURE_COUNT = 3  # Number of images per waypoint
 BURST_INTERVAL = 0.5  # Seconds between captures
 
 
@@ -124,7 +124,7 @@ BURST_INTERVAL = 0.5  # Seconds between captures
 # AI CONFIGURATION  
 # ============================================================================  
 MODEL_PATH = MODEL_DIR / "YOLOv8n_PinyaSuri_AI.tflite"
-DETECTION_THRESHOLD = 0.6
+DETECTION_THRESHOLD = 0.3
 
 CLASS_NAMES = {
     0: "Crown Rot Disease",
@@ -141,7 +141,7 @@ def get_class_name(index: int) -> str:
 
 DRAW_BBOXES = True  # Enable/disable bounding box drawing
 BBOX_THICKNESS = 2  # Thickness of bounding box lines
-FONT_SCALE = 0.5    # Size of label text
+FONT_SCALE = 1.0    # Size of label text
 NMS_IOU_THRESHOLD = 0.5  # IoU threshold for Non-Maximum Suppression
 
 # Color scheme for each class (BGR format for OpenCV)

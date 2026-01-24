@@ -19,6 +19,66 @@ from metrics import FlightMetricsLogger
 running = True
 
 # ----------------------------
+# Image Selection
+# ----------------------------
+def select_best_frame_composite(burst_results):
+    """
+    Score based on:
+    - Number of detections (weight: 0.5)
+    - Average confidence (weight: 0.3)
+    - Image sharpness (weight: 0.2)
+    """
+    best_frame = None
+    best_score = -1
+    
+    for result in burst_results:
+        detections = result['detections']
+        
+        if not detections:
+            score = 0
+        else:
+            # Detection count
+            count_score = len(detections)
+            
+            # Average confidence
+            avg_confidence = sum(d['confidence'] for d in detections) / len(detections)
+            
+            # Image sharpness (already calculated and stored in result)
+            sharpness = result['sharpness']
+            sharpness_normalized = min(sharpness / 1000, 1.0)
+            
+            # Composite score
+            score = (count_score * 0.5 + 
+                    avg_confidence * 0.3 + 
+                    sharpness_normalized * 0.2)
+        
+        if score > best_score:
+            best_score = score
+            best_frame = result
+    
+    return best_frame
+
+
+def rename_best_frame(image_path):
+    try:
+        path = Path(image_path)
+        
+        # Create new name with _BEST suffix
+        new_name = f"BEST_{path.stem}{path.suffix}"
+        new_path = path.parent / new_name
+        
+        # Rename the file
+        path.rename(new_path)
+        
+        logger.info(f"  ✓ Renamed best frame: {path.name} -> {new_name}")
+        
+        return str(new_path)
+    except Exception as e:
+        logger.error(f"  ⚠️ Failed to rename best frame: {e}")
+        return image_path  # Return original path if rename fails
+
+
+# ----------------------------
 # CSV Initialization
 # ----------------------------
 def initialize_image_log():
@@ -109,7 +169,7 @@ def log_detection_results(flight_id, flight_number, waypoint, burst_id, burst_in
 # Capture Handler
 # ----------------------------
 def handle_waypoint_capture(pixhawk, camera, classifier, metrics, waypoint, flight_number, captured_wp, logger):
-    """Capture burst images at waypoint with AI detection"""
+    """Capture burst images at waypoint with AI detection and best frame selection"""
     if waypoint in captured_wp:
         return False
         
@@ -141,11 +201,11 @@ def handle_waypoint_capture(pixhawk, camera, classifier, metrics, waypoint, flig
         logger.warning("=" * 60)
         return False
     
-    # Burst capture WITH DETECTION
+    # Burst capture WITH DETECTION AND SCORING
     num_captures = config.BURST_CAPTURE_COUNT
     burst_interval = config.BURST_INTERVAL
-    captured_images = []
     burst_id = f"{metrics.flight_id}_wp{waypoint}_{int(time.time())}"
+    burst_results = []  # Store all results for selection
 
     logger.info(f"📸 Starting burst capture with AI detection ({num_captures} frames)...")
 
@@ -154,12 +214,12 @@ def handle_waypoint_capture(pixhawk, camera, classifier, metrics, waypoint, flig
         if pixhawk.mode != "AUTO":
             logger.warning("=" * 60)
             logger.warning(f"⚠️ BURST ABORTED at frame {i+1}/{num_captures} - Mode changed to {pixhawk.mode}")
-            logger.warning(f"   Captured {len(captured_images)} images before abort")
+            logger.warning(f"   Captured {len(burst_results)} images before abort")
             logger.warning("=" * 60)
             
-            if captured_images:
+            if burst_results:
                 captured_wp.add(waypoint)
-            return len(captured_images) > 0
+            return len(burst_results) > 0
         
         try:
             # Capture original image
@@ -172,9 +232,8 @@ def handle_waypoint_capture(pixhawk, camera, classifier, metrics, waypoint, flig
             
             # Verify file
             if Path(image_path).exists() and Path(image_path).stat().st_size > 1000:
-                captured_images.append(image_path)
                 
-                # Log image capture
+                # Log image capture to CSV
                 log_image_capture(
                     metrics.flight_id, 
                     flight_number, 
@@ -200,39 +259,27 @@ def handle_waypoint_capture(pixhawk, camera, classifier, metrics, waypoint, flig
                         # Run detection with NMS
                         detections = classifier.detect_with_nms(frame, iou_threshold=config.NMS_IOU_THRESHOLD)
                         
-                        # Save detection image with bounding boxes
-                        detection_image_path = camera.save_detection_image(
-                            image_path,
-                            detections,
-                            waypoint,
-                            flight_number,
-                            prefix="detection",
-                            burst_index=i
-                        )
+                        # Calculate image sharpness
+                        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                        sharpness = cv2.Laplacian(gray, cv2.CV_64F).var()
                         
-                        if detection_image_path:
-                            logger.info(f"  ✓ Detection image saved: {Path(detection_image_path).name}")
+                        # Store result for later selection
+                        burst_results.append({
+                            'image_path': image_path,
+                            'detections': detections,
+                            'sharpness': sharpness,
+                            'frame_index': i,
+                            'frame': frame  # Keep frame in memory for detection image
+                        })
                         
-                        # ✅ CRITICAL: Log results with CURRENT flight_id
-                        log_detection_results(
-                            metrics.flight_id,  # Use current flight_id from metrics
-                            flight_number,
-                            waypoint,
-                            burst_id,
-                            i,
-                            image_path,
-                            detections,
-                            logger
-                        )
-                        
-                        # Log summary
+                        # Log summary for this frame
                         if detections:
                             summary = classifier.get_detection_summary(detections)
-                            logger.info(f"  🔍 AI: Found {summary['total_count']} pineapple(s)")
-                            for class_name, count in summary['class_counts'].items():
-                                logger.info(f"     - {class_name}: {count}")
+                            logger.info(f"  🔍 Frame {i+1}: {summary['total_count']} pineapple(s), "
+                                      f"sharpness: {sharpness:.0f}")
                         else:
-                            logger.info(f"  🔍 AI: No pineapples detected")
+                            logger.info(f"  🔍 Frame {i+1}: No pineapples detected, "
+                                      f"sharpness: {sharpness:.0f}")
                     else:
                         logger.error(f"  ⚠️ Failed to load image for detection")
                         
@@ -247,11 +294,64 @@ def handle_waypoint_capture(pixhawk, camera, classifier, metrics, waypoint, flig
         except Exception as e:
             logger.error(f"⚠ Burst frame {i+1} failed: {e}")
 
-    if captured_images:
-        logger.info(f"✓ CAPTURED {len(captured_images)}/{num_captures} images at {wp_name}")
-        logger.info(f"  Burst ID: {burst_id}")
-        captured_wp.add(waypoint)
-        return True
+    # ============================================================
+    # SELECT BEST FRAME AFTER BURST COMPLETE
+    # ============================================================
+    if burst_results:
+        logger.info("=" * 60)
+        logger.info("📊 SELECTING BEST FRAME FROM BURST...")
+        
+        best_result = select_best_frame_composite(burst_results)
+        
+        if best_result:
+            logger.info(f"  ✓ Selected Frame {best_result['frame_index']} as BEST:")
+            logger.info(f"     - Detections: {len(best_result['detections'])}")
+            logger.info(f"     - Sharpness: {best_result['sharpness']:.0f}")
+            if best_result['detections']:
+                avg_conf = sum(d['confidence'] for d in best_result['detections']) / len(best_result['detections'])
+                logger.info(f"     - Avg Confidence: {avg_conf:.2f}")
+            logger.info("=" * 60)
+            
+            # ✅ RENAME BEST FRAME
+            original_path = best_result['image_path']
+            best_image_path = rename_best_frame(original_path)
+            best_result['image_path'] = best_image_path  # Update path
+            
+            # Queue ONLY the best image for upload
+            uploader.queue_image_upload(best_image_path)
+            
+            # Save detection image for best frame
+            detection_image_path = camera.save_detection_image(
+                best_image_path,  # Use renamed path
+                best_result['detections'],
+                waypoint,
+                flight_number,
+                prefix="detection",
+                burst_index=best_result['frame_index']
+            )
+            
+            if detection_image_path:
+                logger.info(f"  ✓ Detection image saved: {Path(detection_image_path).name}")
+                uploader.queue_image_upload(detection_image_path)
+            
+            # Log to CSV and aggregator using BEST frame's detections
+            log_detection_results(
+                metrics.flight_id,
+                flight_number,
+                waypoint,
+                burst_id,
+                best_result['frame_index'],
+                best_image_path,  # Use renamed path
+                best_result['detections'],
+                logger
+            )
+            
+            captured_wp.add(waypoint)
+            logger.info(f"✓ WAYPOINT {waypoint} CAPTURE COMPLETE.")
+            return True
+        else:
+            logger.error("⚠ No valid frames in burst")
+            return False
     else:
         logger.error("⚠ Burst capture completely failed - no valid images")
         return False

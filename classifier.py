@@ -44,25 +44,36 @@ class PinyaSuriAI:
             raise
 
     def preprocess_frame(self, frame):
-        """Preprocess frame for YOLOv8 input"""
-        try:
-            # YOLOv8 expects RGB (OpenCV loads as BGR)
-            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            
-            # Resize to model input size
-            resized = cv2.resize(rgb_frame, (self.input_width, self.input_height))
-            
-            # Normalize to [0, 1] and convert to float32
-            normalized = resized.astype(np.float32) / 255.0
-            
-            # Add batch dimension: [1, height, width, 3]
-            input_data = np.expand_dims(normalized, axis=0)
-            
-            return input_data
-            
-        except Exception as e:
-            logger.error(f"⚠ Preprocessing failed: {e}")
-            return None
+        """Preprocess with center crop to maintain 1:1 aspect ratio"""
+        # Convert to RGB
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        
+        # Get dimensions
+        h, w = rgb_frame.shape[:2]
+        
+        # CENTER CROP TO SQUARE
+        if w > h:
+            # Landscape (4000x3000) - crop left/right
+            crop_size = h  # 3000
+            start_x = (w - h) // 2  # (4000-3000)//2 = 500
+            cropped = rgb_frame[:, start_x:start_x + crop_size]  # Keep center 3000x3000
+        elif h > w:
+            # Portrait - crop top/bottom (unlikely with your camera)
+            crop_size = w
+            start_y = (h - w) // 2
+            cropped = rgb_frame[start_y:start_y + crop_size, :]
+        else:
+            # Already square
+            cropped = rgb_frame
+        
+        # Now resize square to model input (no distortion!)
+        resized = cv2.resize(cropped, (self.input_width, self.input_height))
+        
+        # Normalize
+        normalized = resized.astype(np.float32) / 255.0
+        input_data = np.expand_dims(normalized, axis=0)
+        
+        return input_data
 
     def detect(self, frame):
         """Detect multiple pineapples in a frame (YOLOv8 format)"""
