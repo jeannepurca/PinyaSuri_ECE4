@@ -64,7 +64,7 @@ def rename_best_frame(image_path):
         path = Path(image_path)
         
         # Create new name with _BEST suffix
-        new_name = f"BEST_{path.stem}{path.suffix}"
+        new_name = f"{path.stem}_BEST{path.suffix}"
         new_path = path.parent / new_name
         
         # Rename the file
@@ -347,7 +347,7 @@ def handle_waypoint_capture(pixhawk, camera, classifier, metrics, waypoint, flig
             )
             
             captured_wp.add(waypoint)
-            logger.info(f"✓ WAYPOINT {waypoint} CAPTURE COMPLETE.")
+            logger.info(f"✓ WAYPOINT {waypoint} CAPTURE COMPLETE")
             return True
         else:
             logger.error("⚠ No valid frames in burst")
@@ -355,7 +355,7 @@ def handle_waypoint_capture(pixhawk, camera, classifier, metrics, waypoint, flig
     else:
         logger.error("⚠ Burst capture completely failed - no valid images")
         return False
-
+    
 def get_telemetry_dict(pixhawk):
     """Build telemetry dictionary for metrics"""
     if not pixhawk.position:

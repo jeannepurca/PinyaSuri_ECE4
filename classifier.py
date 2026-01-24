@@ -29,7 +29,11 @@ class PinyaSuriAI:
             self.input_height = self.input_shape[1]
             self.input_width = self.input_shape[2]
             
-            logger.info(f"✓h Object Detection Model loaded: {config.MODEL_PATH.name}")
+            # Track crop info for bbox adjustment
+            self.last_crop_offset = (0, 0)
+            self.last_crop_size = 0
+            
+            logger.info(f"✓ Object Detection Model loaded: {config.MODEL_PATH.name}")  # Fixed typo
             logger.info(f"  Input shape: {self.input_shape}")
             logger.info(f"  Number of classes: {len(config.CLASS_NAMES)}")
             logger.info(f"  Detection threshold: {config.DETECTION_THRESHOLD}")
@@ -53,18 +57,24 @@ class PinyaSuriAI:
         
         # CENTER CROP TO SQUARE
         if w > h:
-            # Landscape (4000x3000) - crop left/right
-            crop_size = h  # 3000
-            start_x = (w - h) // 2  # (4000-3000)//2 = 500
-            cropped = rgb_frame[:, start_x:start_x + crop_size]  # Keep center 3000x3000
+            # Landscape (4056x3040) - crop left/right
+            crop_size = h  # 3040
+            start_x = (w - h) // 2  # (4056-3040)//2 = 508
+            cropped = rgb_frame[:, start_x:start_x + crop_size]
+            self.last_crop_offset = (start_x, 0)  # Store for bbox adjustment
+            self.last_crop_size = crop_size
         elif h > w:
-            # Portrait - crop top/bottom (unlikely with your camera)
+            # Portrait - crop top/bottom
             crop_size = w
             start_y = (h - w) // 2
             cropped = rgb_frame[start_y:start_y + crop_size, :]
+            self.last_crop_offset = (0, start_y)
+            self.last_crop_size = crop_size
         else:
             # Already square
             cropped = rgb_frame
+            self.last_crop_offset = (0, 0)
+            self.last_crop_size = w
         
         # Now resize square to model input (no distortion!)
         resized = cv2.resize(cropped, (self.input_width, self.input_height))
@@ -80,7 +90,7 @@ class PinyaSuriAI:
         try:
             frame_height, frame_width = frame.shape[:2]
             
-            # Preprocess
+            # Preprocess (also stores crop info)
             input_data = self.preprocess_frame(frame)
             if input_data is None:
                 return []
@@ -95,7 +105,7 @@ class PinyaSuriAI:
             logger.debug(f"YOLOv8 output shape: {output_data.shape}")
             
             # Transpose to [num_boxes, num_features]
-            predictions = output_data[0].T  # Shape: [8400, 5] or [8400, 84]
+            predictions = output_data[0].T
             
             detections = []
             
@@ -105,11 +115,9 @@ class PinyaSuriAI:
                 
                 # Get class confidence
                 if len(pred) == 5:
-                    # Single class model
                     confidence = float(pred[4])
                     class_idx = 0
                 else:
-                    # Multi-class model
                     class_scores = pred[4:]
                     class_idx = int(np.argmax(class_scores))
                     confidence = float(class_scores[class_idx])
@@ -120,7 +128,7 @@ class PinyaSuriAI:
                 
                 class_name = config.get_class_name(class_idx)
                 
-                # Convert from center format to corner format
+                # Convert from center format to corner format (normalized)
                 xmin = (x_center - width / 2) / self.input_width
                 ymin = (y_center - height / 2) / self.input_height
                 xmax = (x_center + width / 2) / self.input_width
@@ -132,18 +140,30 @@ class PinyaSuriAI:
                 xmax = max(0.0, min(1.0, xmax))
                 ymax = max(0.0, min(1.0, ymax))
                 
-                # Convert to pixel coordinates
-                x1_px = int(xmin * frame_width)
-                y1_px = int(ymin * frame_height)
-                x2_px = int(xmax * frame_width)
-                y2_px = int(ymax * frame_height)
+                # Convert to pixel coordinates in CROPPED space
+                x1_crop = int(xmin * self.last_crop_size)
+                y1_crop = int(ymin * self.last_crop_size)
+                x2_crop = int(xmax * self.last_crop_size)
+                y2_crop = int(ymax * self.last_crop_size)
+                
+                # Adjust for crop offset to get ORIGINAL frame coordinates
+                x1_px = x1_crop + self.last_crop_offset[0]
+                y1_px = y1_crop + self.last_crop_offset[1]
+                x2_px = x2_crop + self.last_crop_offset[0]
+                y2_px = y2_crop + self.last_crop_offset[1]
+                
+                # Clamp to original frame bounds
+                x1_px = max(0, min(frame_width, x1_px))
+                y1_px = max(0, min(frame_height, y1_px))
+                x2_px = max(0, min(frame_width, x2_px))
+                y2_px = max(0, min(frame_height, y2_px))
                 
                 detection = {
                     'class_index': class_idx,
                     'class_name': class_name,
                     'confidence': confidence,
                     'bbox': (xmin, ymin, xmax, ymax),  # normalized
-                    'bbox_pixels': (x1_px, y1_px, x2_px, y2_px)  # pixels
+                    'bbox_pixels': (x1_px, y1_px, x2_px, y2_px)  # pixels in original frame
                 }
                 
                 detections.append(detection)
