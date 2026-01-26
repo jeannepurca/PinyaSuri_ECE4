@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# camera.py - Modified to save cropped images
+# camera.py
 
 import logging
 import pathlib

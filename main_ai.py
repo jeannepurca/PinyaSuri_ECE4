@@ -21,53 +21,60 @@ running = True
 # ----------------------------
 # Image Selection
 # ----------------------------
-def select_best_frame_composite(burst_results):
+def select_best_frame_sequential(burst_results):
     """
-    Score based on:
-    - Number of detections (weight: 0.5)
-    - Average confidence (weight: 0.3)
-    - Image sharpness (weight: 0.2)
+    Sequential priority selection:
+    1. FIRST: Frames with detections (if any exist)
+    2. THEN: Among frames with detections, pick highest average confidence
+    3. FALLBACK: If no detections in any frame, pick highest sharpness
+    
+    Priority Order:
+    - Detection count > 0 (yes/no)
+    - If yes → Highest average confidence wins
+    - If no → Highest sharpness wins
     """
-    best_frame = None
-    best_score = -1
+    if not burst_results:
+        return None
     
-    for result in burst_results:
-        detections = result['detections']
-        
-        if not detections:
-            score = 0
-        else:
-            # Detection count
-            count_score = len(detections)
-            
-            # Average confidence
-            avg_confidence = sum(d['confidence'] for d in detections) / len(detections)
-            
-            # Image sharpness (already calculated and stored in result)
-            sharpness = result['sharpness']
-            sharpness_normalized = min(sharpness / 1000, 1.0)
-            
-            # Composite score
-            score = (count_score * 0.5 + 
-                    avg_confidence * 0.3 + 
-                    sharpness_normalized * 0.2)
-        
-        if score > best_score:
-            best_score = score
-            best_frame = result
+    # Separate frames into those with detections vs without
+    frames_with_detections = [r for r in burst_results if len(r['detections']) > 0]
+    frames_without_detections = [r for r in burst_results if len(r['detections']) == 0]
     
-    return best_frame
-
-
-def rename_best_frame(image_path):
+    # PRIORITY 1: Do we have ANY frames with detections?
+    if frames_with_detections:
+        # YES - Select based on CONFIDENCE (among frames with detections)
+        best_frame = None
+        best_confidence = -1
+        
+        for result in frames_with_detections:
+            # Calculate average confidence for this frame
+            avg_confidence = sum(d['confidence'] for d in result['detections']) / len(result['detections'])
+            
+            if avg_confidence > best_confidence:
+                best_confidence = avg_confidence
+                best_frame = result
+        
+        return best_frame
+    
+    else:
+        # NO detections in any frame - Select based on SHARPNESS
+        best_frame = None
+        best_sharpness = -1
+        
+        for result in frames_without_detections:
+            if result['sharpness'] > best_sharpness:
+                best_sharpness = result['sharpness']
+                best_frame = result
+        
+        return best_frame
+    
+def rename_best_frame(image_path, logger):
     try:
         path = Path(image_path)
         
-        # Create new name with _BEST suffix
         new_name = f"{path.stem}_BEST{path.suffix}"
         new_path = path.parent / new_name
         
-        # Rename the file
         path.rename(new_path)
         
         logger.info(f"  ✓ Renamed best frame: {path.name} -> {new_name}")
@@ -75,7 +82,7 @@ def rename_best_frame(image_path):
         return str(new_path)
     except Exception as e:
         logger.error(f"  ⚠️ Failed to rename best frame: {e}")
-        return image_path  # Return original path if rename fails
+        return image_path 
 
 
 # ----------------------------
@@ -169,7 +176,16 @@ def log_detection_results(flight_id, flight_number, waypoint, burst_id, burst_in
 # Capture Handler
 # ----------------------------
 def handle_waypoint_capture(pixhawk, camera, classifier, metrics, waypoint, flight_number, captured_wp, logger):
-    """Capture burst images at waypoint with AI detection and best frame selection"""
+    """Capture burst images at waypoint with AI detection and best frame selection
+    
+    Process:
+    1. Capture FULL RESOLUTION image (4056x3040) - THIS IS WHAT GETS SAVED & UPLOADED
+    2. Preprocess to square (3040x3040) in memory for AI analysis
+    3. AI detects on cropped version (resized to 640x640 internally)
+    4. Select best frame based on detections + sharpness
+    5. Upload ORIGINAL FULL RESOLUTION image of best frame
+    6. Optionally save detection visualization (cropped + bboxes)
+    """
     if waypoint in captured_wp:
         return False
         
@@ -209,7 +225,6 @@ def handle_waypoint_capture(pixhawk, camera, classifier, metrics, waypoint, flig
 
     logger.info(f"📸 Starting burst capture with AI detection ({num_captures} frames)...")
 
-    # ✅ FIXED INDENTATION: This for loop must be indented inside the function
     for i in range(num_captures):
         pixhawk.update()
         if pixhawk.mode != "AUTO":
@@ -223,100 +238,99 @@ def handle_waypoint_capture(pixhawk, camera, classifier, metrics, waypoint, flig
             return len(burst_results) > 0
         
         try:
-            # ✅ Capture original image (temporary - will be replaced by cropped)
-            temp_image_path = camera.capture(
+            # ✅ STEP 1: Capture FULL RESOLUTION image (4056x3040)
+            # This is the ORIGINAL that will be uploaded
+            full_res_image_path = camera.capture(
                 waypoint=waypoint,
                 flight_number=flight_number,
-                prefix="temp",  # Mark as temporary
+                prefix="pinyasuri",
                 burst_index=i
             )
             
             # Verify file
-            if Path(temp_image_path).exists() and Path(temp_image_path).stat().st_size > 1000:
-                
-                logger.info(f"  ✓ Frame {i+1}/{num_captures} captured")
-                
-                # Run AI detection
-                try:
-                    import cv2
-                    
-                    # Load temporary image
-                    frame = cv2.imread(temp_image_path)
-                    
-                    if frame is not None:
-                        # Run detection with NMS (this also creates cropped frame)
-                        detections = classifier.detect_with_nms(frame, iou_threshold=config.NMS_IOU_THRESHOLD)
-                        
-                        # ✅ GET THE CROPPED FRAME from classifier
-                        cropped_frame = classifier.get_cropped_frame()
-                        
-                        if cropped_frame is None:
-                            logger.error(f"  ⚠️ Failed to get cropped frame")
-                            continue
-                        
-                        # ✅ SAVE THE CROPPED IMAGE (this is our main image now)
-                        image_path = camera.save_cropped_image(
-                            cropped_frame,
-                            waypoint=waypoint,
-                            flight_number=flight_number,
-                            prefix="pinyasuri",  # Main prefix
-                            burst_index=i
-                        )
-                        
-                        if not image_path:
-                            logger.error(f"  ⚠️ Failed to save cropped image")
-                            continue
-                        
-                        # Delete the temporary full-size image
-                        try:
-                            Path(temp_image_path).unlink()
-                            logger.debug(f"  ✓ Deleted temporary image")
-                        except Exception as e:
-                            logger.debug(f"  ⚠️ Could not delete temp image: {e}")
-                        
-                        # Calculate image sharpness on cropped frame
-                        gray = cv2.cvtColor(cropped_frame, cv2.COLOR_BGR2GRAY)
-                        sharpness = cv2.Laplacian(gray, cv2.CV_64F).var()
-                        
-                        # Log image capture to CSV with CROPPED image path
-                        log_image_capture(
-                            metrics.flight_id, 
-                            flight_number, 
-                            waypoint, 
-                            pixhawk.position,
-                            burst_id,
-                            i,
-                            image_path,  # Now points to cropped image
-                            logger
-                        )
-                        
-                        logger.info(f"  ✓ Cropped image saved: {Path(image_path).name}")
-                        logger.info(f"     Size: {cropped_frame.shape[1]}x{cropped_frame.shape[0]} (square)")
-                        
-                        # Store result for later selection
-                        burst_results.append({
-                            'image_path': image_path,  # Cropped image path
-                            'detections': detections,
-                            'sharpness': sharpness,
-                            'frame_index': i,
-                            'cropped_frame': cropped_frame  # Keep cropped frame in memory
-                        })
-                        
-                        # Log summary for this frame
-                        if detections:
-                            summary = classifier.get_detection_summary(detections)
-                            logger.info(f"  🔍 Frame {i+1}: {summary['total_count']} pineapple(s), "
-                                      f"sharpness: {sharpness:.0f}")
-                        else:
-                            logger.info(f"  🔍 Frame {i+1}: No pineapples detected, "
-                                      f"sharpness: {sharpness:.0f}")
-                    else:
-                        logger.error(f"  ⚠️ Failed to load image for detection")
-                        
-                except Exception as e:
-                    logger.error(f"  ⚠️ AI detection failed: {e}")
-            else:
+            if not Path(full_res_image_path).exists() or Path(full_res_image_path).stat().st_size < 1000:
                 logger.error(f"⚠ Frame {i+1} file invalid or too small")
+                continue
+            
+            logger.info(f"  ✓ Frame {i+1}/{num_captures} captured (4056x3040)")
+            
+            # ✅ STEP 2: Load FULL RESOLUTION image into memory
+            try:
+                import cv2
+                
+                full_res_frame = cv2.imread(full_res_image_path)
+                
+                if full_res_frame is None:
+                    logger.error(f"  ⚠️ Failed to load image for detection")
+                    continue
+                
+                # ✅ STEP 3: Run AI detection
+                # The classifier.detect_with_nms() will internally:
+                #   - Crop to square (3040x3040) via preprocess_frame()
+                #   - Resize to 640x640 for AI model
+                #   - Run detection
+                #   - Store the cropped frame in classifier.last_cropped_frame
+                detections = classifier.detect_with_nms(
+                    full_res_frame, 
+                    iou_threshold=config.NMS_IOU_THRESHOLD
+                )
+                
+                # ✅ STEP 4: Get the cropped frame (for detection visualization later)
+                cropped_frame = classifier.get_cropped_frame()
+                
+                if cropped_frame is None:
+                    logger.error(f"  ⚠️ Failed to get cropped frame from classifier")
+                    continue
+                
+                # ✅ STEP 5: Calculate sharpness on the cropped frame
+                # (AI sees cropped, so we measure quality on what AI sees)
+                gray = cv2.cvtColor(cropped_frame, cv2.COLOR_BGR2GRAY)
+                sharpness = cv2.Laplacian(gray, cv2.CV_64F).var()
+                
+                # ✅ STEP 6: Log image capture with FULL RESOLUTION path
+                log_image_capture(
+                    metrics.flight_id, 
+                    flight_number, 
+                    waypoint, 
+                    pixhawk.position,
+                    burst_id,
+                    i,
+                    full_res_image_path,  # ← Original 4056x3040 image
+                    logger
+                )
+                
+                logger.info(f"     Full resolution saved: 4056x3040 ({Path(full_res_image_path).name})")
+                logger.info(f"     AI analyzed: 3040x3040 (cropped) → 640x640 (model input)")
+                
+                # ✅ STEP 7: Store results for best frame selection
+                burst_results.append({
+                    'image_path': full_res_image_path,  # ← FULL RESOLUTION path
+                    'detections': detections,
+                    'sharpness': sharpness,
+                    'frame_index': i,
+                    'cropped_frame': cropped_frame  # Keep for detection viz only
+                })
+                
+                # Log detailed detection summary for this frame
+                logger.info(f"  🔍 Frame {i+1} Analysis:")
+                logger.info(f"     └─ Detections: {len(detections)}")
+                
+                if detections:
+                    # Show each detection with class and confidence
+                    for idx, det in enumerate(detections, 1):
+                        logger.info(f"        • Detection {idx}: {det['class_name']} "
+                                  f"(confidence: {det['confidence']:.3f})")
+                    
+                    # Calculate and show average confidence
+                    avg_conf = sum(d['confidence'] for d in detections) / len(detections)
+                    logger.info(f"     └─ Avg Confidence: {avg_conf:.3f}")
+                
+                logger.info(f"     └─ Sharpness: {sharpness:.1f}")
+                    
+            except Exception as e:
+                logger.error(f"  ⚠️ AI detection failed: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
             
             if i < num_captures - 1:
                 time.sleep(burst_interval)
@@ -326,59 +340,79 @@ def handle_waypoint_capture(pixhawk, camera, classifier, metrics, waypoint, flig
 
     # ============================================================
     # SELECT BEST FRAME AFTER BURST COMPLETE
-    # ✅ FIXED INDENTATION: This section must be at the same level as the for loop
     # ============================================================
     if burst_results:
         logger.info("=" * 60)
         logger.info("📊 SELECTING BEST FRAME FROM BURST...")
         
-        best_result = select_best_frame_composite(burst_results)
+        best_result = select_best_frame_sequential(burst_results)
         
         if best_result:
             logger.info(f"  ✓ Selected Frame {best_result['frame_index']} as BEST:")
-            logger.info(f"     - Detections: {len(best_result['detections'])}")
-            logger.info(f"     - Sharpness: {best_result['sharpness']:.0f}")
+            logger.info(f"     └─ Detections: {len(best_result['detections'])}")
+            
             if best_result['detections']:
+                # Show individual detections
+                for idx, det in enumerate(best_result['detections'], 1):
+                    logger.info(f"        • Detection {idx}: {det['class_name']} "
+                              f"(confidence: {det['confidence']:.3f})")
+                
+                # Show average confidence
                 avg_conf = sum(d['confidence'] for d in best_result['detections']) / len(best_result['detections'])
-                logger.info(f"     - Avg Confidence: {avg_conf:.2f}")
+                logger.info(f"     └─ Avg Confidence: {avg_conf:.3f}")
+            
+            logger.info(f"     └─ Sharpness: {best_result['sharpness']:.1f}")
             logger.info("=" * 60)
             
-            # ✅ RENAME BEST FRAME
+            # ✅ RENAME BEST FRAME (FULL RESOLUTION 4056x3040)
             original_path = best_result['image_path']
-            best_image_path = rename_best_frame(original_path)
-            best_result['image_path'] = best_image_path  # Update path
+            best_image_path = rename_best_frame(original_path, logger)
+            best_result['image_path'] = best_image_path
             
-            # Queue ONLY the best image for upload
+            # ✅ Queue FULL RESOLUTION image for upload
+            logger.info(f"  ✓ Uploading: {Path(best_image_path).name} (4056x3040 - FULL RES)")
             uploader.queue_image_upload(best_image_path)
             
-            # ✅ Save detection image using CROPPED frame
-            detection_image_path = camera.save_detection_image(
-                best_result['cropped_frame'],  # Use cropped frame, not path
-                best_result['detections'],
-                waypoint,
-                flight_number,
-                prefix="detection",
-                burst_index=best_result['frame_index']
-            )
+            # ✅ OPTIONAL: Save detection visualization (cropped + bboxes)
+            # This is for debugging/verification - shows what AI saw
+            if config.DRAW_BBOXES and best_result['detections']:
+                detection_image_path = camera.save_detection_image(
+                    best_result['cropped_frame'],  # Use cropped version
+                    best_result['detections'],
+                    waypoint,
+                    flight_number,
+                    prefix="detection",
+                    burst_index=best_result['frame_index']
+                )
+                
+                if detection_image_path:
+                    logger.info(f"  ✓ Detection viz saved: {Path(detection_image_path).name} (3040x3040 cropped)")
+                    uploader.queue_image_upload(detection_image_path)
             
-            if detection_image_path:
-                logger.info(f"  ✓ Detection image saved: {Path(detection_image_path).name}")
-                uploader.queue_image_upload(detection_image_path)
-            
-            # Log to CSV and aggregator using BEST frame's detections
+            # Log detection results to CSV
             log_detection_results(
                 metrics.flight_id,
                 flight_number,
                 waypoint,
                 burst_id,
                 best_result['frame_index'],
-                best_image_path,  # Use renamed cropped path
+                best_image_path,  # Full resolution path
                 best_result['detections'],
                 logger
             )
             
+            # ✅ DELETE NON-SELECTED FRAMES to save space
+            for result in burst_results:
+                if result['frame_index'] != best_result['frame_index']:
+                    try:
+                        Path(result['image_path']).unlink()
+                        logger.debug(f"  ✓ Deleted non-selected frame {result['frame_index']}")
+                    except Exception as e:
+                        logger.debug(f"  ⚠️ Could not delete frame: {e}")
+            
             captured_wp.add(waypoint)
             logger.info(f"✓ WAYPOINT {waypoint} CAPTURE COMPLETE")
+            logger.info(f"  └─ Best frame: FULL RESOLUTION (4056x3040)")
             return True
         else:
             logger.error("⚠ No valid frames in burst")
@@ -386,7 +420,7 @@ def handle_waypoint_capture(pixhawk, camera, classifier, metrics, waypoint, flig
     else:
         logger.error("⚠ Burst capture completely failed - no valid images")
         return False
-    
+        
 def get_telemetry_dict(pixhawk):
     """Build telemetry dictionary for metrics"""
     if not pixhawk.position:
