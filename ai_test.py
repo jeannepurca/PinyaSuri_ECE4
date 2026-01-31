@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# ai_test.py - Test classifier and camera without flying
+# ai_test.py
 
 import logging
 import sys
@@ -201,7 +201,6 @@ class DetectionTester:
 
 
 def main():
-    """Main entry point"""
     try:
         # Ensure directories exist
         config.ensure_directories()
