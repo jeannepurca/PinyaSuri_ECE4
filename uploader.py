@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# uploader.py - COMPLETE FIX: Flight tracking with proper initialization
+# uploader.py - FIXED: Added missing print_url_mapping_debug method
 
 import json
 import requests
@@ -161,6 +161,34 @@ class FlightDataAggregator:
             'start_time': flight['start_time'].strftime('%H:%M:%S') if flight['start_time'] else 'None',
             'end_time': flight['end_time'].strftime('%H:%M:%S') if flight['end_time'] else 'None'
         }
+    
+    def print_url_mapping_debug(self, flight_id):
+        """Print debug information about URL mappings for this flight"""
+        flight = self.flights[flight_id]
+        
+        logger.info(f"URL Mapping Debug for {flight_id}:")
+        logger.info(f"  Total images tracked: {len(flight['images'])}")
+        logger.info(f"  Images with URLs: {len(flight['image_url_map'])}")
+        logger.info(f"  Waypoints with image URLs: {len(flight['waypoint_images'])}")
+        
+        # Show URL mapping details
+        if flight['image_url_map']:
+            logger.info("  Image URL mappings:")
+            for local_path, url in flight['image_url_map'].items():
+                logger.info(f"    {Path(local_path).name} → {url}")
+        else:
+            logger.warning("  ⚠️ No image URLs have been mapped yet!")
+        
+        # Show waypoint image associations
+        if flight['waypoint_images']:
+            logger.info("  Waypoint image URLs:")
+            for waypoint, urls in flight['waypoint_images'].items():
+                wp_name = config.get_waypoint_name(waypoint) if hasattr(config, 'get_waypoint_name') else f"WP{waypoint}"
+                logger.info(f"    {wp_name}: {len(urls)} images")
+                for url in urls:
+                    logger.info(f"      - {url}")
+        else:
+            logger.warning("  ⚠️ No waypoint image URLs have been linked yet!")
     
     def generate_flight_summary(self, flight_id, total_waypoints):
         """Generate comprehensive flight summary JSON with SERVER image URLs"""
