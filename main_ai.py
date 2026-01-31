@@ -451,7 +451,7 @@ def handle_arm_state_change(pixhawk, metrics, was_armed, flight_number, captured
         pixhawk.clear_waypoint_log()
         uploader.disable_uploads_during_flight()
         
-        # WHEN DRONE ARMS
+        # Signal to reset waypoint tracking
         return True, flight_number, True
         
     elif not pixhawk.armed and was_armed:
@@ -476,10 +476,8 @@ def handle_arm_state_change(pixhawk, metrics, was_armed, flight_number, captured
         captured_wp.clear()
         pixhawk.clear_waypoint_log()
         
-        # WHEN DRONE DISARMS
         return False, metrics.flight_number, False
     
-    # NO CHANGE
     return was_armed, flight_number, False
 
 def is_drone_in_air(pixhawk):
@@ -587,15 +585,15 @@ def main_loop(pixhawk, camera, classifier, metrics, logger):
         # Reset waypoint tracking on new flight
         if should_reset_waypoint:
             current_waypoint = -1  # Reset to force update on first waypoint
-            logger.debug("✓ Waypoint tracking reset for new flight.")
+            last_waypoint_check_time = 0  # Also reset check timer
+            logger.info("✓ Waypoint tracking reset for new flight")
 
         # Check for flight mode changes
         if pixhawk.mode != current_mode:
             current_mode = pixhawk.mode
             logger.info(f"> Flight Mode: {current_mode}")
 
-        # IMPROVED WAYPOINT CHANGE DETECTION
-        # Check both for actual changes AND periodically re-check to catch missed updates
+        # IMPROVED WAYPOINT CHANGE DETECTION WITH ACTIVE POLLING
         current_time = time.time()
         
         # Detect if waypoint actually changed
@@ -603,10 +601,10 @@ def main_loop(pixhawk, camera, classifier, metrics, logger):
                            pixhawk.last_wp is not None and 
                            pixhawk.last_wp != current_waypoint)
         
-        # Periodic re-check every 2 seconds to catch missed MISSION_CURRENT messages
+        # More aggressive recheck (every 0.5 seconds) to catch missed MISSION_CURRENT messages
         should_recheck = (pixhawk.armed and 
                          pixhawk.last_wp is not None and 
-                         (current_time - last_waypoint_check_time) > 2.0)
+                         (current_time - last_waypoint_check_time) > 0.5)
         
         if waypoint_changed or should_recheck:
             # Only log if waypoint actually changed (not on periodic recheck)
@@ -630,10 +628,14 @@ def main_loop(pixhawk, camera, classifier, metrics, logger):
             else:
                 alt_str = "N/A"
             
-            logger.debug(f"[STATUS] Mode: {pixhawk.mode}, WP: {pixhawk.last_wp}, "
-                        f"Alt: {alt_str}, "
-                        f"Dist to WP: {dist_str}, "
-                        f"Captured: {captured_wp}")
+            # Enhanced logging to diagnose waypoint tracking issues
+            logger.info(f"[STATUS] Mode: {pixhawk.mode}, "
+                       f"last_wp: {pixhawk.last_wp}, "
+                       f"current_waypoint: {current_waypoint}, "
+                       f"Alt: {alt_str}, "
+                       f"Dist to WP: {dist_str}, "
+                       f"Groundspeed: {pixhawk.groundspeed:.2f}m/s, "
+                       f"Captured: {captured_wp}")
 
         # Safe Waypoint Guard
         wp = pixhawk.current_waypoint or {"lat": None, "lon": None, "alt": None}
