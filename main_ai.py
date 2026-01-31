@@ -451,7 +451,7 @@ def handle_arm_state_change(pixhawk, metrics, was_armed, flight_number, captured
         pixhawk.clear_waypoint_log()
         uploader.disable_uploads_during_flight()
         
-        # Signal to reset waypoint tracking
+        # WHEN DRONE ARMS
         return True, flight_number, True
         
     elif not pixhawk.armed and was_armed:
@@ -476,8 +476,10 @@ def handle_arm_state_change(pixhawk, metrics, was_armed, flight_number, captured
         captured_wp.clear()
         pixhawk.clear_waypoint_log()
         
+        # WHEN DRONE DISARMS
         return False, metrics.flight_number, False
     
+    # NO CHANGE
     return was_armed, flight_number, False
 
 def is_drone_in_air(pixhawk):
@@ -585,7 +587,7 @@ def main_loop(pixhawk, camera, classifier, metrics, logger):
         # Reset waypoint tracking on new flight
         if should_reset_waypoint:
             current_waypoint = -1  # Reset to force update on first waypoint
-            logger.debug("✓ Waypoint tracking reset for new flight")
+            logger.debug("✓ Waypoint tracking reset for new flight.")
 
         # Check for flight mode changes
         if pixhawk.mode != current_mode:
