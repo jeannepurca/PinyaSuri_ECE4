@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# main_ai.py - FIXED: Proper indentation for cropped image saving
+# main_ai.py - FIXED: Better waypoint change detection
 
 import time
 import csv
@@ -238,8 +238,7 @@ def handle_waypoint_capture(pixhawk, camera, classifier, metrics, waypoint, flig
             return len(burst_results) > 0
         
         try:
-            # ✅ STEP 1: Capture FULL RESOLUTION image (4056x3040)
-            # This is the ORIGINAL that will be uploaded
+            # Capture FULL RESOLUTION image (4056x3040)
             full_res_image_path = camera.capture(
                 waypoint=waypoint,
                 flight_number=flight_number,
@@ -254,7 +253,7 @@ def handle_waypoint_capture(pixhawk, camera, classifier, metrics, waypoint, flig
             
             logger.info(f"  ✓ Frame {i+1}/{num_captures} captured (4056x3040)")
             
-            # ✅ STEP 2: Load FULL RESOLUTION image into memory
+            # Load FULL RESOLUTION image into memory
             try:
                 import cv2
                 
@@ -264,7 +263,7 @@ def handle_waypoint_capture(pixhawk, camera, classifier, metrics, waypoint, flig
                     logger.error(f"  ⚠️ Failed to load image for detection")
                     continue
                 
-                # ✅ STEP 3: Run AI detection
+                # Run AI detection
                 # The classifier.detect_with_nms() will internally:
                 #   - Crop to square (3040x3040) via preprocess_frame()
                 #   - Resize to 640x640 for AI model
@@ -275,19 +274,19 @@ def handle_waypoint_capture(pixhawk, camera, classifier, metrics, waypoint, flig
                     iou_threshold=config.NMS_IOU_THRESHOLD
                 )
                 
-                # ✅ STEP 4: Get the cropped frame (for detection visualization later)
+                # Get the cropped frame (for detection visualization later)
                 cropped_frame = classifier.get_cropped_frame()
                 
                 if cropped_frame is None:
                     logger.error(f"  ⚠️ Failed to get cropped frame from classifier")
                     continue
                 
-                # ✅ STEP 5: Calculate sharpness on the cropped frame
+                # Calculate sharpness on the cropped frame
                 # (AI sees cropped, so we measure quality on what AI sees)
                 gray = cv2.cvtColor(cropped_frame, cv2.COLOR_BGR2GRAY)
                 sharpness = cv2.Laplacian(gray, cv2.CV_64F).var()
                 
-                # ✅ STEP 6: Log image capture with FULL RESOLUTION path
+                # Log image capture with FULL RESOLUTION path
                 log_image_capture(
                     metrics.flight_id, 
                     flight_number, 
@@ -302,7 +301,7 @@ def handle_waypoint_capture(pixhawk, camera, classifier, metrics, waypoint, flig
                 logger.info(f"     Full resolution saved: 4056x3040 ({Path(full_res_image_path).name})")
                 logger.info(f"     AI analyzed: 3040x3040 (cropped) → 640x640 (model input)")
                 
-                # ✅ STEP 7: Store results for best frame selection
+                # Store results for best frame selection
                 burst_results.append({
                     'image_path': full_res_image_path,  # ← FULL RESOLUTION path
                     'detections': detections,
@@ -364,16 +363,16 @@ def handle_waypoint_capture(pixhawk, camera, classifier, metrics, waypoint, flig
             logger.info(f"     └─ Sharpness: {best_result['sharpness']:.1f}")
             logger.info("=" * 60)
             
-            # ✅ RENAME BEST FRAME (FULL RESOLUTION 4056x3040)
+            # Rename Best Frame
             original_path = best_result['image_path']
             best_image_path = rename_best_frame(original_path, logger)
             best_result['image_path'] = best_image_path
             
-            # ✅ Queue FULL RESOLUTION image for upload
+            # Queue FULL RESOLUTION image for upload
             logger.info(f"  ✓ Uploading: {Path(best_image_path).name} (4056x3040 - FULL RES)")
             uploader.queue_image_upload(best_image_path)
             
-            # ✅ OPTIONAL: Save detection visualization (cropped + bboxes)
+            # Save detection visualization (cropped + bboxes)
             # This is for debugging/verification - shows what AI saw
             if config.DRAW_BBOXES and best_result['detections']:
                 detection_image_path = camera.save_detection_image(
@@ -401,7 +400,7 @@ def handle_waypoint_capture(pixhawk, camera, classifier, metrics, waypoint, flig
                 logger
             )
             
-            # ✅ DELETE NON-SELECTED FRAMES to save space
+            # DELETE NON-SELECTED FRAMES to save space
             for result in burst_results:
                 if result['frame_index'] != best_result['frame_index']:
                     try:
@@ -434,7 +433,10 @@ def get_telemetry_dict(pixhawk):
     }
 
 def handle_arm_state_change(pixhawk, metrics, was_armed, flight_number, captured_wp, logger):
-    """Detect and handle arm/disarm transitions"""
+    """Detect and handle arm/disarm transitions
+    
+    Returns: (was_armed, flight_number, should_reset_waypoint)
+    """
     if pixhawk.armed and not was_armed:
         # Just armed - START NEW FLIGHT
         logger.info("=" * 60)
@@ -443,19 +445,20 @@ def handle_arm_state_change(pixhawk, metrics, was_armed, flight_number, captured
         logger.info("=" * 60)
         metrics.start_flight()
         
-        # ✅ CRITICAL: Tell uploader about the new flight
+        # Tell uploader about the new flight
         uploader.start_new_flight(metrics.flight_id)
         
         pixhawk.clear_waypoint_log()
         uploader.disable_uploads_during_flight()
         
-        return True, flight_number
+        # Signal to reset waypoint tracking
+        return True, flight_number, True
         
     elif not pixhawk.armed and was_armed:
         # Just disarmed - END CURRENT FLIGHT
         logger.info(f"🛬 FLIGHT #{flight_number} - DRONE DISARMED")
         
-        # ✅ CRITICAL: Get flight_id BEFORE ending flight
+        # Get flight_id BEFORE ending flight
         current_flight_id = metrics.flight_id
         
         metrics.end_flight()
@@ -463,7 +466,7 @@ def handle_arm_state_change(pixhawk, metrics, was_armed, flight_number, captured
         total_waypoints = pixhawk.get_last_waypoint() if pixhawk else 0
         logger.info(">>> Generating flight summary...")
         
-        # ✅ Use the flight_id from WHEN THE FLIGHT WAS ACTIVE
+        # Use the flight_id from WHEN THE FLIGHT WAS ACTIVE
         summary_path = uploader.finalize_flight_summary(current_flight_id, total_waypoints)
         
         if summary_path:
@@ -473,9 +476,9 @@ def handle_arm_state_change(pixhawk, metrics, was_armed, flight_number, captured
         captured_wp.clear()
         pixhawk.clear_waypoint_log()
         
-        return False, metrics.flight_number
+        return False, metrics.flight_number, False
     
-    return was_armed, flight_number
+    return was_armed, flight_number, False
 
 def is_drone_in_air(pixhawk):
     """Check if drone altitude is within capture range"""
@@ -561,8 +564,9 @@ def main_loop(pixhawk, camera, classifier, metrics, logger):
     flight_number = metrics.flight_number
     was_armed = False
     current_mode = "UNKNOWN"
-    current_waypoint = None
+    current_waypoint = -1  # Initialize to invalid waypoint (-1 forces first update)
     last_debug_time = 0
+    last_waypoint_check_time = 0  # Track last time we checked waypoint
     
     logger.info("=" * 60)
     logger.info("🍍 PINYASURI FLIGHT SYSTEM READY! 🚁")
@@ -574,22 +578,45 @@ def main_loop(pixhawk, camera, classifier, metrics, logger):
         pixhawk.update()
         
         # Handle arm/disarm state changes
-        was_armed, flight_number = handle_arm_state_change(
+        was_armed, flight_number, should_reset_waypoint = handle_arm_state_change(
             pixhawk, metrics, was_armed, flight_number, captured_wp, logger
         )
+        
+        # Reset waypoint tracking on new flight
+        if should_reset_waypoint:
+            current_waypoint = -1  # Reset to force update on first waypoint
+            logger.debug("✓ Waypoint tracking reset for new flight")
 
         # Check for flight mode changes
         if pixhawk.mode != current_mode:
             current_mode = pixhawk.mode
             logger.info(f"> Flight Mode: {current_mode}")
 
-        # Check for waypoint changes (only when armed and waypoint is valid)
-        if pixhawk.armed and pixhawk.last_wp is not None and pixhawk.last_wp != current_waypoint:
-            current_waypoint = pixhawk.last_wp
-            wp_name = config.get_waypoint_name(current_waypoint)
-            wp_type = config.get_waypoint_type(current_waypoint)
+        # IMPROVED WAYPOINT CHANGE DETECTION
+        # Check both for actual changes AND periodically re-check to catch missed updates
+        current_time = time.time()
+        
+        # Detect if waypoint actually changed
+        waypoint_changed = (pixhawk.armed and 
+                           pixhawk.last_wp is not None and 
+                           pixhawk.last_wp != current_waypoint)
+        
+        # Periodic re-check every 2 seconds to catch missed MISSION_CURRENT messages
+        should_recheck = (pixhawk.armed and 
+                         pixhawk.last_wp is not None and 
+                         (current_time - last_waypoint_check_time) > 2.0)
+        
+        if waypoint_changed or should_recheck:
+            # Only log if waypoint actually changed (not on periodic recheck)
+            if waypoint_changed:
+                current_waypoint = pixhawk.last_wp
+                wp_name = config.get_waypoint_name(current_waypoint)
+                wp_type = config.get_waypoint_type(current_waypoint)
+                
+                logger.info(f"📍 Navigating to {wp_name} (WP{current_waypoint}) [{wp_type}]")
             
-            logger.info(f"📍 Navigating to {wp_name} (WP{current_waypoint}) [{wp_type}]")
+            # Update recheck timestamp
+            last_waypoint_check_time = current_time
 
         # PERIODIC DEBUG OUTPUT (every 2 seconds when armed)
         if pixhawk.armed and (time.time() - last_debug_time) > 2.0:
@@ -656,7 +683,7 @@ def cleanup(camera, pixhawk, metrics, was_armed, logger):
     if was_armed:
         logger.info(">>> Finalizing flight metrics...")
         
-        # ✅ CRITICAL: Get flight_id BEFORE ending flight
+        # Get flight_id BEFORE ending flight
         current_flight_id = metrics.flight_id
         
         metrics.end_flight()
@@ -665,7 +692,7 @@ def cleanup(camera, pixhawk, metrics, was_armed, logger):
         total_waypoints = pixhawk.get_last_waypoint() if pixhawk else 0
         logger.info(">>> Generating flight summary...")
         
-        # ✅ Use the flight_id from when flight was active
+        # Use the flight_id from when flight was active
         summary_path = uploader.finalize_flight_summary(current_flight_id, total_waypoints)
         
         if summary_path:

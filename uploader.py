@@ -833,7 +833,7 @@ def finalize_flight_summary(flight_id, total_waypoints):
         logger.info("✓ Flight summary queued for upload")
     
     logger.info("=" * 60)
-    logger.info("✅ FLIGHT FINALIZATION COMPLETE")
+    logger.info("FLIGHT FINALIZATION COMPLETE")
     logger.info("=" * 60)
     
     return summary_path

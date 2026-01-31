@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# classifier.py - Modified to return cropped image
+# classifier.py
 
 import logging
 import numpy as np
@@ -77,7 +77,7 @@ class PinyaSuriAI:
             self.last_crop_offset = (0, 0)
             self.last_crop_size = w
         
-        # ✅ NEW: Store cropped frame in BGR for later use
+        # Store cropped frame in BGR for later use
         self.last_cropped_frame = cv2.cvtColor(cropped, cv2.COLOR_RGB2BGR)
         
         # Now resize square to model input (no distortion!)
@@ -148,7 +148,7 @@ class PinyaSuriAI:
                 xmax = max(0.0, min(1.0, xmax))
                 ymax = max(0.0, min(1.0, ymax))
                 
-                # ✅ UPDATED: Convert to pixel coordinates in CROPPED space
+                # Convert to pixel coordinates in CROPPED space
                 # (bbox_pixels now refers to the cropped image, not original)
                 x1_px = int(xmin * self.last_crop_size)
                 y1_px = int(ymin * self.last_crop_size)
