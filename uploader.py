@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# uploader.py - FIXED: Added missing print_url_mapping_debug method
+# uploader.py
 
 import json
 import requests
