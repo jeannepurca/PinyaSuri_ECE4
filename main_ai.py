@@ -566,7 +566,6 @@ def main_loop(pixhawk, camera, classifier, metrics, logger):
     current_mode = "UNKNOWN"
     current_waypoint = -1  # Initialize to invalid waypoint (-1 forces first update)
     last_debug_time = 0
-    last_waypoint_check_time = 0  # Track last time we checked waypoint
     
     logger.info("=" * 60)
     logger.info("🍍 PINYASURI FLIGHT SYSTEM READY! 🚁")
@@ -582,10 +581,9 @@ def main_loop(pixhawk, camera, classifier, metrics, logger):
             pixhawk, metrics, was_armed, flight_number, captured_wp, logger
         )
         
-        # Reset waypoint tracking on new flight
+        # CRITICAL FIX: Reset waypoint tracking on new flight
         if should_reset_waypoint:
             current_waypoint = -1  # Reset to force update on first waypoint
-            last_waypoint_check_time = 0  # Also reset check timer
             logger.info("✓ Waypoint tracking reset for new flight")
 
         # Check for flight mode changes
@@ -593,30 +591,15 @@ def main_loop(pixhawk, camera, classifier, metrics, logger):
             current_mode = pixhawk.mode
             logger.info(f"> Flight Mode: {current_mode}")
 
-        # IMPROVED WAYPOINT CHANGE DETECTION WITH ACTIVE POLLING
-        current_time = time.time()
-        
-        # Detect if waypoint actually changed
-        waypoint_changed = (pixhawk.armed and 
-                           pixhawk.last_wp is not None and 
-                           pixhawk.last_wp != current_waypoint)
-        
-        # More aggressive recheck (every 0.5 seconds) to catch missed MISSION_CURRENT messages
-        should_recheck = (pixhawk.armed and 
-                         pixhawk.last_wp is not None and 
-                         (current_time - last_waypoint_check_time) > 0.5)
-        
-        if waypoint_changed or should_recheck:
-            # Only log if waypoint actually changed (not on periodic recheck)
-            if waypoint_changed:
+        # ULTRA-RELIABLE WAYPOINT CHANGE DETECTION
+        # Check EVERY loop iteration when armed in AUTO mode (no timers to miss!)
+        if pixhawk.armed and pixhawk.mode == "AUTO" and pixhawk.last_wp is not None:
+            if pixhawk.last_wp != current_waypoint:
                 current_waypoint = pixhawk.last_wp
                 wp_name = config.get_waypoint_name(current_waypoint)
                 wp_type = config.get_waypoint_type(current_waypoint)
                 
                 logger.info(f"📍 Navigating to {wp_name} (WP{current_waypoint}) [{wp_type}]")
-            
-            # Update recheck timestamp
-            last_waypoint_check_time = current_time
 
         # PERIODIC DEBUG OUTPUT (every 2 seconds when armed)
         if pixhawk.armed and (time.time() - last_debug_time) > 2.0:
