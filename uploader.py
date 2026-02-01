@@ -718,15 +718,15 @@ def finalize_flight_summary(flight_id, total_waypoints):
     if not flight_aggregator.has_flight_data(flight_id):
         logger.error(f"❌ No flight data found for {flight_id}")
         
-        logger.info("   Flight info:")
+        logger.debug("   Flight info:")  # Changed from info to debug
         info = flight_aggregator.get_flight_info(flight_id)
         for key, value in info.items():
-            logger.info(f"     {key}: {value}")
+            logger.debug(f"     {key}: {value}")  # Changed from info to debug
         
-        logger.info("   Available flights:")
+        logger.debug("   Available flights:")  # Changed from info to debug
         for fid in flight_aggregator.flights.keys():
             finfo = flight_aggregator.get_flight_info(fid)
-            logger.info(f"     - {fid}: {finfo}")
+            logger.debug(f"     - {fid}: {finfo}")  # Changed from info to debug
         
         for fid in sorted(flight_aggregator.flights.keys(), reverse=True):
             if flight_aggregator.has_flight_data(fid):
