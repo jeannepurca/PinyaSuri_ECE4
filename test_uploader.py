@@ -49,7 +49,7 @@ logger.info(f"📂 Image Directory: {IMAGE_DIR}")
 logger.info("=" * 60)
 
 # Detect if using local or cloud server
-is_local_server = "192.168" in SERVER_BASE or "localhost" in SERVER_BASE or "127.0.0.1" in SERVER_BASE
+is_local_server = "192.168" in SERVER_BASE or "localhost" in SERVER_BASE or "127.0.0.1" in SERVER_BASE or "10." in SERVER_BASE
 if is_local_server:
     logger.info("🏠 Using LOCAL SERVER - ensure server is running and reachable")
 else:
@@ -189,7 +189,8 @@ def test_upload_json_direct(json_path):
         return False
 
 
-def test_upload_image_direct(image_path):
+def test_upload_image_direct(image_path, flight_id=None, waypoint=None):
+    """Test direct image upload - with optional flight_id override"""
     try:
         image_file = Path(image_path)
         
@@ -201,19 +202,21 @@ def test_upload_image_direct(image_path):
         logger.info(f"📤 Testing direct image upload: {image_file.name} ({file_size_mb:.2f} MB)")
         logger.info(f"   → Endpoint: {IMAGE_UPLOAD_ENDPOINT}")
         
-        # Extract waypoint from filename if possible
-        import re
-        waypoint_match = re.search(r'_wp(\d+)_', image_file.name)
-        if waypoint_match:
-            waypoint_num = int(waypoint_match.group(1))
-            waypoint = config.get_waypoint_name(waypoint_num) if hasattr(config, 'get_waypoint_name') else f"WP{waypoint_num}"
-        else:
-            waypoint = "WP1"  # Default for testing
+        # Extract waypoint from filename if not provided
+        if waypoint is None:
+            import re
+            waypoint_match = re.search(r'_wp(\d+)_', image_file.name)
+            if waypoint_match:
+                waypoint_num = int(waypoint_match.group(1))
+                waypoint = config.get_waypoint_name(waypoint_num) if hasattr(config, 'get_waypoint_name') else f"WAYPOINT_{waypoint_num}"
+            else:
+                waypoint = "WAYPOINT_2"  # Default for testing
         
-        # Test flight ID
-        test_flight_id = f"TEST_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        # Use provided flight_id or create one
+        if flight_id is None:
+            flight_id = f"TEST_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         
-        logger.info(f"   → Flight ID: {test_flight_id}")
+        logger.info(f"   → Flight ID: {flight_id}")
         logger.info(f"   → Waypoint: {waypoint}")
         
         # Match server's expected field name
@@ -222,7 +225,7 @@ def test_upload_image_direct(image_path):
             
             # Include required data fields
             data = {
-                "flight_id": test_flight_id,
+                "flight_id": flight_id,
                 "waypoint": waypoint
             }
             
@@ -623,7 +626,7 @@ def test_uploader_workflow():
 
 
 def test_image_url_capture():
-    """Test if image upload returns a URL that can be captured"""
+    """Test if image upload returns a URL that can be captured - FIXED VERSION"""
     logger.info("=" * 60)
     logger.info("🧪 TESTING IMAGE URL CAPTURE")
     logger.info("=" * 60)
@@ -643,12 +646,14 @@ def test_image_url_capture():
     
     logger.info(f"\n📸 Test image: {test_image.name}")
     logger.info(f"   Size: {test_image.stat().st_size / (1024*1024):.2f} MB")
+    logger.info(f"   Path: {test_image}")
     
     # ========================================
-    # FIX: CREATE FLIGHT LOG FIRST
+    # CREATE FLIGHT LOG FIRST
     # ========================================
     logger.info(f"\n📋 Step 1: Creating flight log first...")
     logger.info(f"   Flight ID: {test_flight_id}")
+    logger.info("   (Your server requires flight to exist before accepting images)")
     
     minimal_flight_log = {
         "id": test_flight_id,
@@ -683,39 +688,58 @@ def test_image_url_capture():
         response = requests.post(
             FLIGHT_LOG_ENDPOINT,
             json=minimal_flight_log,
-            timeout=30
+            timeout=30,
+            headers={"Content-Type": "application/json"}
         )
         
         if response.status_code in [200, 201]:
             logger.info(f"   ✅ Flight log created (Status: {response.status_code})")
         else:
             logger.warning(f"   ⚠️  Got status {response.status_code}: {response.text[:100]}")
+            logger.warning("   Continuing anyway...")
             
     except Exception as e:
         logger.error(f"   ❌ Failed to create flight log: {e}")
+        logger.info("   Continuing anyway to test image upload...")
     
     # ========================================
     # NOW UPLOAD IMAGE
     # ========================================
     logger.info(f"\n📤 Step 2: Uploading image...")
-    success, image_url = test_upload_image_direct(test_image)
+    success, image_url = test_upload_image_direct(test_image, flight_id=test_flight_id, waypoint="WAYPOINT_2")
     
-    # Rest of the function stays the same...
+    # Analyze results
     if success and image_url:
         logger.info("\n" + "=" * 60)
         logger.info("✅ URL CAPTURE TEST PASSED!")
         logger.info(f"   Server returned URL: {image_url}")
         logger.info("=" * 60)
+        logger.info("\n💡 Your server is properly configured!")
+        logger.info("   The uploader.py system will work correctly.")
+        logger.info("   Waypoint-image linking should function as expected.")
     elif success and not image_url:
         logger.warning("\n" + "=" * 60)
         logger.warning("⚠️  URL CAPTURE TEST INCOMPLETE")
         logger.warning("   Image uploaded successfully, but no URL was returned")
         logger.warning("=" * 60)
+        logger.warning("\n💡 Action needed:")
+        logger.warning("   Your server needs to return the image URL in the response.")
+        logger.warning("\n   Expected response format (JSON):")
+        logger.warning("   {")
+        logger.warning('     "url": "http://10.12.127.21:5000/uploads/image123.jpg"')
+        logger.warning("   }")
+        logger.warning("\n   Or one of these field names:")
+        logger.warning("   - url, image_url, file_url, path, filepath")
+        logger.warning("\n   Without URLs, waypoint-image linking will fail!")
     else:
         logger.error("\n" + "=" * 60)
         logger.error("❌ URL CAPTURE TEST FAILED")
         logger.error("   Image upload failed")
         logger.error("=" * 60)
+        logger.error("\n💡 Check:")
+        logger.error("   1. Server is running")
+        logger.error("   2. Endpoint URL is correct")
+        logger.error("   3. Network connection")
 
 
 # ============================================================================
@@ -834,7 +858,7 @@ def show_config_info():
 
 if __name__ == "__main__":
     print("\n" + "=" * 60)
-    print("🧪 PINYASURI UPLOADER TEST SCRIPT")
+    print("🧪 PINYASURI UPLOADER TEST SCRIPT - FIXED")
     print("=" * 60)
     
     # Show current configuration
@@ -857,13 +881,13 @@ if __name__ == "__main__":
     print("\n" + "=" * 60)
     print("🎯 RECOMMENDED TEST ORDER:")
     print("   1. Test server connection (option 7)")
-    print("   2. Test image URL capture (option 2)")
+    print("   2. Test image URL capture (option 2) - NOW FIXED!")
     print("   3. Test complete workflow (option 1)")
     print("   4. Validate existing JSON files (option 6)")
     print("\n" + "=" * 60)
     print("Available options:")
     print("  1. 🚀 Test complete uploader workflow (RECOMMENDED)")
-    print("  2. 🔍 Test image URL capture")
+    print("  2. 🔍 Test image URL capture (FIXED)")
     print("  3. 📤 Test direct image upload")
     print("  4. 📄 Test direct JSON upload")
     print("  5. 📋 List available files")
