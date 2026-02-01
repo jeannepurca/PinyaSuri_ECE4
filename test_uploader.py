@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# test_uploader_v2.py - Improved Uploader Testing with Server Compatibility
+# test_uploader.py
 
 """
 Enhanced test script that accounts for server requirements:
