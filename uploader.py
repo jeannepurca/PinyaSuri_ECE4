@@ -403,7 +403,7 @@ class UploadQueue:
             self.uploading_enabled = True
             self.current_flight_id = flight_id
             logger.info("       └─ UPLOAD ENABLED - Flight complete, starting uploads...")
-            logger.info(f"      └─ Flight ID: {flight_id}")
+            logger.info(f"       └─ Flight ID: {flight_id}")
             
             # Upload images FIRST, then JSON
             image_uploads = [(t, p) for t, p in self.pending_uploads if t == "image"]
@@ -417,7 +417,7 @@ class UploadQueue:
             for upload_type, file_path in json_uploads:
                 self.upload_queue.put((upload_type, file_path))
             
-            logger.info(f"      └─ ✓ Queued {len(image_uploads)} images + {len(json_uploads)} JSON files")
+            logger.info(f"       └─ ✓ Queued {len(image_uploads)} images + {len(json_uploads)} JSON files")
             self.pending_uploads.clear()
     
     def disable_uploading(self):

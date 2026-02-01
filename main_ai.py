@@ -466,9 +466,7 @@ def handle_arm_state_change(pixhawk, metrics, was_armed, flight_number, captured
         metrics.end_flight()
         
         total_waypoints = pixhawk.get_last_waypoint() if pixhawk else 0
-        logger.info("=" * 60)
         logger.info(">>> Generating flight summary...")
-        logger.info("=" * 60)
         
         # Use the flight_id from WHEN THE FLIGHT WAS ACTIVE
         summary_path = uploader.finalize_flight_summary(current_flight_id, total_waypoints)

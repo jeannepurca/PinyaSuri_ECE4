@@ -112,7 +112,7 @@ class Pixhawk:
         msg = self.master.recv_match(type='MISSION_COUNT', blocking=True, timeout=5)
         if msg:
             self.mission_count = msg.count
-            logger.info(f"  ✓ Mission has {self.mission_count} waypoints (0 to {self.mission_count - 1})")
+            logger.info(f"  └─ ✓ Mission has {self.mission_count} waypoints (0 to {self.mission_count - 1})")
             return self.mission_count
         else:
             logger.warning("⚠ Failed to get mission count")
