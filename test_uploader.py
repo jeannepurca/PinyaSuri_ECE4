@@ -639,46 +639,83 @@ def test_image_url_capture():
         return
     
     test_image = image_files[0]
+    test_flight_id = f"TEST_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     
     logger.info(f"\n📸 Test image: {test_image.name}")
     logger.info(f"   Size: {test_image.stat().st_size / (1024*1024):.2f} MB")
-    logger.info(f"   Path: {test_image}")
     
-    # Upload directly and check response
-    logger.info("\n📤 Uploading to test URL capture...")
+    # ========================================
+    # FIX: CREATE FLIGHT LOG FIRST
+    # ========================================
+    logger.info(f"\n📋 Step 1: Creating flight log first...")
+    logger.info(f"   Flight ID: {test_flight_id}")
+    
+    minimal_flight_log = {
+        "id": test_flight_id,
+        "type": "flight",
+        "date": datetime.now().strftime("%B %d, %Y"),
+        "start_time": datetime.now().strftime("%H:%M:%S"),
+        "end_time": datetime.now().strftime("%H:%M:%S"),
+        "summary": {
+            "total_waypoints": 3,
+            "captured_waypoints": 1,
+            "mission_status": "Test",
+            "pineapples_detected": 0,
+            "healthy_pineapples": 0,
+            "afflicted_pineapples": 0,
+            "most_common_affliction": None,
+            "avg_confidence": 0.0
+        },
+        "waypoints": [
+            {
+                "waypoint_id": "WAYPOINT_2",
+                "image": "",
+                "images": [],
+                "num_pineapples": 0,
+                "healthy": 0,
+                "afflicted": 0,
+                "afflictions": {}
+            }
+        ]
+    }
+    
+    try:
+        response = requests.post(
+            FLIGHT_LOG_ENDPOINT,
+            json=minimal_flight_log,
+            timeout=30
+        )
+        
+        if response.status_code in [200, 201]:
+            logger.info(f"   ✅ Flight log created (Status: {response.status_code})")
+        else:
+            logger.warning(f"   ⚠️  Got status {response.status_code}: {response.text[:100]}")
+            
+    except Exception as e:
+        logger.error(f"   ❌ Failed to create flight log: {e}")
+    
+    # ========================================
+    # NOW UPLOAD IMAGE
+    # ========================================
+    logger.info(f"\n📤 Step 2: Uploading image...")
     success, image_url = test_upload_image_direct(test_image)
     
+    # Rest of the function stays the same...
     if success and image_url:
         logger.info("\n" + "=" * 60)
         logger.info("✅ URL CAPTURE TEST PASSED!")
         logger.info(f"   Server returned URL: {image_url}")
         logger.info("=" * 60)
-        logger.info("\n💡 Your server is properly configured!")
-        logger.info("   The uploader.py system will work correctly.")
-        logger.info("   Waypoint-image linking should function as expected.")
     elif success and not image_url:
         logger.warning("\n" + "=" * 60)
         logger.warning("⚠️  URL CAPTURE TEST INCOMPLETE")
         logger.warning("   Image uploaded successfully, but no URL was returned")
         logger.warning("=" * 60)
-        logger.warning("\n💡 Action needed:")
-        logger.warning("   Your server needs to return the image URL in the response.")
-        logger.warning("\n   Expected response format (JSON):")
-        logger.warning("   {")
-        logger.warning('     "url": "http://192.168.1.16:5000/uploads/image123.jpg"')
-        logger.warning("   }")
-        logger.warning("\n   Or one of these field names:")
-        logger.warning("   - url, image_url, file_url, path, filepath")
-        logger.warning("\n   Without URLs, waypoint-image linking will fail!")
     else:
         logger.error("\n" + "=" * 60)
         logger.error("❌ URL CAPTURE TEST FAILED")
         logger.error("   Image upload failed")
         logger.error("=" * 60)
-        logger.error("\n💡 Check:")
-        logger.error("   1. Server is running")
-        logger.error("   2. Endpoint URL is correct")
-        logger.error("   3. Network connection")
 
 
 # ============================================================================
