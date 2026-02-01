@@ -568,15 +568,53 @@ def should_capture_image(pixhawk, waypoint, captured_wp, logger):
 def main_loop(pixhawk, camera, classifier, metrics, logger):
     captured_wp = set()
     flight_number = metrics.flight_number
-    was_armed = False
     current_mode = "UNKNOWN"
-    current_waypoint = -1  # Initialize to invalid waypoint (-1 forces first update)
+    current_waypoint = -1
     last_debug_time = 0
     
     logger.info("=" * 60)
     logger.info("🍍 PINYASURI FLIGHT SYSTEM READY! 🚁")
     logger.info("System will run continuously. Press Ctrl+C to stop.")
     logger.info("=" * 60)
+
+    # ========================================
+    # DIAGNOSTIC MODE - ADD THIS HERE (BEFORE THE MAIN LOOP)
+    # ========================================
+    logger.info("=" * 60)
+    logger.info("DIAGNOSTIC: Watching arm state for 10 seconds...")
+    logger.info("=" * 60)
+    
+    start_time = time.time()
+    arm_states = []
+    
+    while time.time() - start_time < 10:
+        pixhawk.update()
+        arm_states.append((time.time(), pixhawk.armed))
+        time.sleep(0.1)
+    
+    # Analyze
+    changes = 0
+    for i in range(1, len(arm_states)):
+        if arm_states[i][1] != arm_states[i-1][1]:
+            changes += 1
+            logger.info(f"  State change at {arm_states[i][0]:.2f}s: {arm_states[i-1][1]} → {arm_states[i][1]}")
+    
+    logger.info(f"Total state changes in 10s: {changes}")
+    logger.info("=" * 60)
+    
+    if changes > 5:
+        logger.warning("⚠️ EXCESSIVE STATE FLICKERING DETECTED!")
+        logger.warning("   Possible causes:")
+        logger.warning("   1. QGC still connected (disconnect it)")
+        logger.warning("   2. Unstable serial connection")
+        logger.warning("   3. Pixhawk not properly initialized")
+    
+    # Initialize was_armed AFTER diagnostic check
+    was_armed = pixhawk.armed
+    logger.info(f"✓ Initial armed state: {was_armed}")
+    # ========================================
+    # END DIAGNOSTIC
+    # ========================================
 
     while running:
         # Update pixhawk telemetry
@@ -598,7 +636,6 @@ def main_loop(pixhawk, camera, classifier, metrics, logger):
             logger.info(f"> Flight Mode: {current_mode}")
 
         # ULTRA-RELIABLE WAYPOINT CHANGE DETECTION
-        # Check EVERY loop iteration when armed in AUTO mode (no timers to miss!)
         if pixhawk.armed and pixhawk.mode == "AUTO" and pixhawk.last_wp is not None:
             if pixhawk.last_wp != current_waypoint:
                 current_waypoint = pixhawk.last_wp
@@ -617,7 +654,6 @@ def main_loop(pixhawk, camera, classifier, metrics, logger):
             else:
                 alt_str = "N/A"
             
-            # Enhanced logging to diagnose waypoint tracking issues
             logger.debug(f"[STATUS] Mode: {pixhawk.mode}, "
                        f"last_wp: {pixhawk.last_wp}, "
                        f"current_waypoint: {current_waypoint}, "
@@ -653,7 +689,6 @@ def main_loop(pixhawk, camera, classifier, metrics, logger):
                 "is_hovering": pixhawk.is_hovering(threshold=config.HOVER_SPEED_THRESHOLD),
             }
             metrics.log_telemetry(telemetry)
-
         
         # Check for image capture
         if should_capture_image(pixhawk, pixhawk.last_wp, captured_wp, logger):
