@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# main_ai.py - FIXED: Better waypoint change detection
+# main_ai.py
 
 import time
 import csv
@@ -251,7 +251,7 @@ def handle_waypoint_capture(pixhawk, camera, classifier, metrics, waypoint, flig
                 logger.error(f"⚠ Frame {i+1} file invalid or too small")
                 continue
             
-            logger.info(f"  ✓ Frame {i+1}/{num_captures} captured (4056x3040)")
+            logger.info(f">>> ✓ Frame {i+1}/{num_captures} captured. (4056x3040)")
             
             # Load FULL RESOLUTION image into memory
             try:
@@ -451,12 +451,14 @@ def handle_arm_state_change(pixhawk, metrics, was_armed, flight_number, captured
         pixhawk.clear_waypoint_log()
         uploader.disable_uploads_during_flight()
         
-        # Signal to reset waypoint tracking
+        # When armed
         return True, flight_number, True
         
     elif not pixhawk.armed and was_armed:
         # Just disarmed - END CURRENT FLIGHT
+        logger.info("=" * 60)
         logger.info(f"🛬 FLIGHT #{flight_number} - DRONE DISARMED")
+        logger.info("=" * 60)
         
         # Get flight_id BEFORE ending flight
         current_flight_id = metrics.flight_id
@@ -464,7 +466,9 @@ def handle_arm_state_change(pixhawk, metrics, was_armed, flight_number, captured
         metrics.end_flight()
         
         total_waypoints = pixhawk.get_last_waypoint() if pixhawk else 0
+        logger.info("=" * 60)
         logger.info(">>> Generating flight summary...")
+        logger.info("=" * 60)
         
         # Use the flight_id from WHEN THE FLIGHT WAS ACTIVE
         summary_path = uploader.finalize_flight_summary(current_flight_id, total_waypoints)
@@ -476,8 +480,10 @@ def handle_arm_state_change(pixhawk, metrics, was_armed, flight_number, captured
         captured_wp.clear()
         pixhawk.clear_waypoint_log()
         
+        # When disarmed
         return False, metrics.flight_number, False
     
+    # No change
     return was_armed, flight_number, False
 
 def is_drone_in_air(pixhawk):
@@ -581,9 +587,9 @@ def main_loop(pixhawk, camera, classifier, metrics, logger):
             pixhawk, metrics, was_armed, flight_number, captured_wp, logger
         )
         
-        # CRITICAL FIX: Reset waypoint tracking on new flight
+        # Reset waypoint tracking on new flight
         if should_reset_waypoint:
-            current_waypoint = -1  # Reset to force update on first waypoint
+            current_waypoint = -1
             logger.info("✓ Waypoint tracking reset for new flight")
 
         # Check for flight mode changes
@@ -612,7 +618,7 @@ def main_loop(pixhawk, camera, classifier, metrics, logger):
                 alt_str = "N/A"
             
             # Enhanced logging to diagnose waypoint tracking issues
-            logger.info(f"[STATUS] Mode: {pixhawk.mode}, "
+            logger.debug(f"[STATUS] Mode: {pixhawk.mode}, "
                        f"last_wp: {pixhawk.last_wp}, "
                        f"current_waypoint: {current_waypoint}, "
                        f"Alt: {alt_str}, "
@@ -695,7 +701,7 @@ def cleanup(camera, pixhawk, metrics, was_armed, logger):
     try:
         if pixhawk and pixhawk.master:
             pixhawk.master.close()
-            logger.info("✓ Pixhawk connection closed.")
+            logger.info("   ✓ Pixhawk connection closed.")
     except Exception as e:
         logger.warning(f"⚠ Error closing Pixhawk: {e} ⚠")
 
@@ -718,7 +724,6 @@ def main():
     pixhawk = Pixhawk()
     camera = Camera()
 
-    logger.info(">>> Initializing AI detector...")
     try:
         classifier = PinyaSuriAI()
         camera.set_classifier(classifier)  # Set classifier for camera
@@ -729,10 +734,6 @@ def main():
 
     next_flight_number = get_next_daily_flight_number()
     metrics = FlightMetricsLogger(flight_number=next_flight_number)
-
-    logger.info("=" * 60)
-    logger.info("🍍 PINYASURI FLIGHT SYSTEM 🚁")
-    logger.info("=" * 60)
     
     # Wait for connection
     try:
@@ -743,9 +744,7 @@ def main():
         was_armed = main_loop(pixhawk, camera, classifier, metrics, logger)
     except KeyboardInterrupt:
         logger.info("")
-        logger.info("=" * 60)
         logger.info("⚠ MANUAL STOP - Interrupted by user! ⚠")
-        logger.info("=" * 60)
 
         time.sleep(0.5)
         was_armed = pixhawk.armed if pixhawk else False

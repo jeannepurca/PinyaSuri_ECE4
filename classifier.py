@@ -35,9 +35,9 @@ class PinyaSuriAI:
             self.last_cropped_frame = None  # NEW: Store the cropped frame (BGR)
             
             logger.info(f"✓ Object Detection Model loaded: {config.MODEL_PATH.name}")
-            logger.info(f"  Input shape: {self.input_shape}")
-            logger.info(f"  Number of classes: {len(config.CLASS_NAMES)}")
-            logger.info(f"  Detection threshold: {config.DETECTION_THRESHOLD}")
+            logger.info(f"  └─ Input shape: {self.input_shape}")
+            logger.info(f"  └─ Number of classes: {len(config.CLASS_NAMES)}")
+            logger.info(f"  └─ Detection threshold: {config.DETECTION_THRESHOLD}")
             
         except ImportError:
             logger.error("⚠ tflite_runtime not installed!")

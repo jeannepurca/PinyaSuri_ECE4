@@ -14,6 +14,7 @@ from collections import defaultdict
 
 logger = logging.getLogger(__name__)
 
+
 # ============================================================================
 # SERVER ENDPOINTS
 # ============================================================================
@@ -23,10 +24,40 @@ IMAGE_UPLOAD_ENDPOINT = config.IMAGE_UPLOAD_ENDPOINT
 logger.info(f"📡 Flight Log Endpoint: {FLIGHT_LOG_ENDPOINT}")
 logger.info(f"📡 Image Upload Endpoint: {IMAGE_UPLOAD_ENDPOINT}")
 
+
+# ============================================================================
+# CONNECTION SETTINGS FOR LOCAL NETWORK
+# ============================================================================
+# Longer timeout for local network
+REQUEST_TIMEOUT = 30  # seconds
+
+# Connection retry settings
+MAX_CONNECTION_RETRIES = 3
+CONNECTION_RETRY_DELAY = 5  # seconds
+
+def test_server_connection():
+    """Test if server is reachable before starting uploads"""
+    try:
+        # Try a simple GET request to the base URL
+        base_url = config.SERVER_BASE
+        response = requests.get(base_url, timeout=5)
+        logger.info(f"✓ Server connection successful: {base_url}")
+        return True
+    except requests.exceptions.ConnectionError:
+        logger.warning(f"⚠ Cannot connect to server: {config.SERVER_BASE}")
+        logger.warning("  Make sure:")
+        logger.warning("  1. Server is running")
+        logger.warning("  2. IP address is correct")
+        logger.warning("  3. Both devices are on same network")
+        return False
+    except Exception as e:
+        logger.warning(f"⚠ Server connection test failed: {e}")
+        return False
+
+
 # ============================================================================
 # FLIGHT DATA AGGREGATOR
 # ============================================================================
-
 class FlightDataAggregator:
     """Aggregates detection data to create comprehensive flight summaries"""
     
@@ -44,7 +75,7 @@ class FlightDataAggregator:
             'images': [],
             'image_url_map': {},
             'waypoint_images': defaultdict(list),
-            'initialized': False  # Track if flight was properly initialized
+            'initialized': False
         })
         self.current_flight_id = None
     
@@ -53,7 +84,6 @@ class FlightDataAggregator:
         self.current_flight_id = flight_id
         flight = self.flights[flight_id]
         
-        # Set start time immediately
         if flight['start_time'] is None:
             flight['start_time'] = datetime.now()
             flight['initialized'] = True
@@ -64,21 +94,17 @@ class FlightDataAggregator:
         """Add detection data for a specific waypoint image"""
         flight = self.flights[flight_id]
         
-        # Initialize flight if not already done (safety fallback)
         if not flight['initialized']:
             logger.warning(f"⚠️  Late initialization of flight {flight_id}")
             flight['start_time'] = datetime.now()
             flight['initialized'] = True
         
-        # Track current time
         current_time = datetime.now()
         flight['end_time'] = current_time
         
-        # Track images for this flight
         if str(image_path) not in flight['images']:
             flight['images'].append(str(image_path))
         
-        # Initialize waypoint if first time
         if waypoint not in flight['waypoints']:
             flight['waypoints'][waypoint] = {
                 'images': [],
@@ -92,16 +118,13 @@ class FlightDataAggregator:
         
         wp_data = flight['waypoints'][waypoint]
         
-        # Process detections for this image
         for det in detections:
             class_name = det['class_name']
             confidence = det['confidence']
             
-            # Update waypoint counts
             wp_data['total_pineapples'] += 1
             flight['total_detections'] += 1
             
-            # Classify as healthy or afflicted
             if class_name.lower() == 'healthy' or class_name.lower() == 'pineapple':
                 wp_data['healthy'] += 1
                 flight['healthy_count'] += 1
@@ -109,14 +132,12 @@ class FlightDataAggregator:
                 wp_data['afflicted'] += 1
                 flight['afflicted_count'] += 1
                 
-                # Track affliction counts
                 wp_data['afflictions'][class_name] += 1
                 flight['afflictions'][class_name].append({
                     'waypoint': waypoint,
                     'confidence': round(confidence, 3)
                 })
         
-        # Store image path for this waypoint
         if str(image_path) not in wp_data['images']:
             wp_data['images'].append(str(image_path))
     
@@ -125,10 +146,8 @@ class FlightDataAggregator:
         flight = self.flights[flight_id]
         local_path_str = str(local_path)
         
-        # Store the URL mapping
         flight['image_url_map'][local_path_str] = server_url
         
-        # Find which waypoint this image belongs to and add URL to that waypoint
         for waypoint, wp_data in flight['waypoints'].items():
             if local_path_str in wp_data['images']:
                 if server_url not in flight['waypoint_images'][waypoint]:
@@ -166,12 +185,11 @@ class FlightDataAggregator:
         """Print debug information about URL mappings for this flight"""
         flight = self.flights[flight_id]
         
-        logger.info(f"URL Mapping Debug for {flight_id}:")
-        logger.info(f"  Total images tracked: {len(flight['images'])}")
-        logger.info(f"  Images with URLs: {len(flight['image_url_map'])}")
-        logger.info(f"  Waypoints with image URLs: {len(flight['waypoint_images'])}")
+        logger.info(f"      └─ URL Mapping Debug for {flight_id}:")
+        logger.info(f"          Total images tracked: {len(flight['images'])}")
+        logger.info(f"          Images with URLs: {len(flight['image_url_map'])}")
+        logger.info(f"          Waypoints with image URLs: {len(flight['waypoint_images'])}")
         
-        # Show URL mapping details
         if flight['image_url_map']:
             logger.info("  Image URL mappings:")
             for local_path, url in flight['image_url_map'].items():
@@ -179,9 +197,8 @@ class FlightDataAggregator:
         else:
             logger.warning("  ⚠️ No image URLs have been mapped yet!")
         
-        # Show waypoint image associations
         if flight['waypoint_images']:
-            logger.info("  Waypoint image URLs:")
+            logger.info("          Waypoint image URLs:")
             for waypoint, urls in flight['waypoint_images'].items():
                 wp_name = config.get_waypoint_name(waypoint) if hasattr(config, 'get_waypoint_name') else f"WP{waypoint}"
                 logger.info(f"    {wp_name}: {len(urls)} images")
@@ -195,11 +212,9 @@ class FlightDataAggregator:
         flight = self.flights[flight_id]
         flight['total_waypoints'] = total_waypoints
         
-        # Calculate mission status
         captured_count = len(flight['captured_waypoints'])
         mission_status = "Completed" if captured_count >= total_waypoints else "Incomplete"
         
-        # Find most common affliction
         most_common_affliction = None
         max_count = 0
         
@@ -209,7 +224,6 @@ class FlightDataAggregator:
                 max_count = count
                 most_common_affliction = affliction
         
-        # Calculate overall average confidence
         all_confidences = []
         for instances in flight['afflictions'].values():
             for inst in instances:
@@ -217,23 +231,18 @@ class FlightDataAggregator:
         
         avg_confidence = sum(all_confidences) / len(all_confidences) if all_confidences else 0
         
-        # Format times
         date_str = flight['start_time'].strftime("%B %d, %Y") if flight['start_time'] else datetime.now().strftime("%B %d, %Y")
         start_time_str = flight['start_time'].strftime("%H:%M:%S") if flight['start_time'] else "00:00"
         end_time_str = flight['end_time'].strftime("%H:%M:%S") if flight['end_time'] else "00:00"
         
-        # Build waypoint details with SERVER URLs
         waypoint_list = []
         for wp_num in sorted(flight['waypoints'].keys()):
             wp_data = flight['waypoints'][wp_num]
             
-            # Get waypoint name
             waypoint_name = config.get_waypoint_name(wp_num) if hasattr(config, 'get_waypoint_name') else f"WP{wp_num}"
             
-            # GET ALL SERVER URLs FOR THIS WAYPOINT
             waypoint_image_urls = self.get_waypoint_image_urls(flight_id, wp_num)
             
-            # Use first image URL for primary display, include all URLs
             primary_image_url = waypoint_image_urls[0] if waypoint_image_urls else ""
             
             waypoint_entry = {
@@ -248,7 +257,6 @@ class FlightDataAggregator:
             
             waypoint_list.append(waypoint_entry)
         
-        # Build complete summary
         summary = {
             'id': flight_id,
             'type': 'flight',
@@ -280,7 +288,6 @@ class FlightDataAggregator:
     def save_flight_summary(self, flight_id, total_waypoints):
         """Save flight summary to JSON file"""
         try:
-            # Check if we have any data for this flight
             if not self.has_flight_data(flight_id):
                 logger.warning(f"⚠️  No flight data found for {flight_id}")
                 logger.warning(f"   Available flights:")
@@ -291,21 +298,19 @@ class FlightDataAggregator:
             
             summary = self.generate_flight_summary(flight_id, total_waypoints)
             
-            # Create summary directory
             summary_dir = config.JSON_DIR / "flight_summaries"
             summary_dir.mkdir(parents=True, exist_ok=True)
             
-            # Save to file
             filename = f"{flight_id}_summary.json"
             filepath = summary_dir / filename
             
             with open(filepath, 'w') as f:
                 json.dump(summary, f, indent=4)
             
-            logger.info(f"✓ Flight summary saved: {filepath}")
-            logger.info(f"  └─ {summary['summary']['captured_waypoints']} waypoints captured")
-            logger.info(f"  └─ {summary['image_metadata']['total_images']} images linked")
-            logger.info(f"  └─ Time: {summary['start_time']} - {summary['end_time']}")
+            logger.info(f"      └─ ✓ Flight summary saved: {filepath}")
+            logger.info(f"          └─ {summary['summary']['captured_waypoints']} waypoints captured")
+            logger.info(f"          └─ {summary['image_metadata']['total_images']} images linked")
+            logger.info(f"          └─ Time: {summary['start_time']} - {summary['end_time']}")
             
             return filepath
             
@@ -323,7 +328,6 @@ flight_aggregator = FlightDataAggregator()
 # ============================================================================
 # UPLOAD QUEUE SYSTEM (POST-FLIGHT ONLY)
 # ============================================================================
-
 class UploadQueue:
     """Manages upload queue - uploads images FIRST, then JSON with URLs"""
     def __init__(self, max_retries=3, retry_delay=60):
@@ -377,10 +381,14 @@ class UploadQueue:
     def start(self):
         """Start the background upload worker"""
         if not self.running:
+            # Test server connection before starting
+            logger.info("🔍 Testing server connection...")
+            test_server_connection()
+            
             self.running = True
             self.worker_thread = threading.Thread(target=self._worker, daemon=True)
             self.worker_thread.start()
-            logger.info("✓ Upload queue worker started (uploads paused during flight)")
+            logger.info("  └─ ✓ Upload queue worker started (POST-FLIGHT)")
     
     def stop(self):
         """Stop the background upload worker"""
@@ -394,12 +402,10 @@ class UploadQueue:
         if not self.uploading_enabled:
             self.uploading_enabled = True
             self.current_flight_id = flight_id
-            logger.info("=" * 60)
-            logger.info("📤 UPLOAD ENABLED - Flight complete, starting uploads...")
-            logger.info(f"   Flight ID: {flight_id}")
-            logger.info("=" * 60)
+            logger.info("       └─ UPLOAD ENABLED - Flight complete, starting uploads...")
+            logger.info(f"      └─ Flight ID: {flight_id}")
             
-            # CRITICAL: Upload images FIRST, then JSON
+            # Upload images FIRST, then JSON
             image_uploads = [(t, p) for t, p in self.pending_uploads if t == "image"]
             json_uploads = [(t, p) for t, p in self.pending_uploads if t == "json"]
             
@@ -411,13 +417,13 @@ class UploadQueue:
             for upload_type, file_path in json_uploads:
                 self.upload_queue.put((upload_type, file_path))
             
-            logger.info(f"✓ Queued {len(image_uploads)} images + {len(json_uploads)} JSON files")
+            logger.info(f"      └─ ✓ Queued {len(image_uploads)} images + {len(json_uploads)} JSON files")
             self.pending_uploads.clear()
     
     def disable_uploading(self):
         """Disable uploading during flight"""
         self.uploading_enabled = False
-        logger.info("⏸️  Upload paused - Flight in progress")
+        logger.info("   ⏸️  Upload paused - Flight in progress")
     
     def add_json(self, json_path):
         """Add JSON file"""
@@ -443,7 +449,7 @@ class UploadQueue:
     
     def _worker(self):
         """Background worker that processes upload queue"""
-        logger.info("🔄 Upload worker thread running...")
+        logger.info(">>> Upload worker thread running...")
         
         retry_counter = 0
         
@@ -516,7 +522,6 @@ class UploadQueue:
         self.failed_uploads = still_failed
     
     def _upload_json_internal(self, json_path):
-        """Internal JSON upload - USES FLIGHT_LOG_ENDPOINT"""
         try:
             if not Path(json_path).exists():
                 logger.error(f"⚠ JSON file not found: {json_path}")
@@ -525,33 +530,38 @@ class UploadQueue:
             with open(json_path, "r") as f:
                 json_data = json.load(f)
             
+            logger.debug(f"📤 Uploading JSON to {FLIGHT_LOG_ENDPOINT}...")
+            
             response = requests.post(
                 FLIGHT_LOG_ENDPOINT, 
                 json=json_data, 
-                timeout=30,
+                timeout=REQUEST_TIMEOUT,
                 headers={"Content-Type": "application/json"}
             )
             
             if response.status_code in [200, 201]:
                 logger.info(f"✓ JSON uploaded: {Path(json_path).name}")
+                logger.debug(f"  Server response: {response.text[:100]}")
                 return True
             else:
                 logger.warning(f"⚠ Server error {response.status_code}: {Path(json_path).name}")
                 logger.warning(f"   Response: {response.text[:200]}")
                 return False
                 
-        except requests.exceptions.ConnectionError:
-            logger.debug(f"⚠ No connection - will retry: {Path(json_path).name}")
+        except requests.exceptions.ConnectionError as e:
+            logger.debug(f"⚠ Connection failed - will retry: {Path(json_path).name}")
+            logger.debug(f"   Error: {e}")
             return False
         except requests.exceptions.Timeout:
             logger.debug(f"⚠ Timeout - will retry: {Path(json_path).name}")
             return False
         except Exception as e:
             logger.error(f"⚠ Upload error: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return False
     
     def _upload_image_internal(self, image_path):
-        """Upload image - USES IMAGE_UPLOAD_ENDPOINT and captures server URL"""
         try:
             image_file = Path(image_path)
             
@@ -559,30 +569,39 @@ class UploadQueue:
                 logger.error(f"⚠ Image file not found: {image_path}")
                 return False
             
+            logger.debug(f"📤 Uploading image to {IMAGE_UPLOAD_ENDPOINT}...")
+            
             with open(image_file, "rb") as f:
-                files = {"file": (image_file.name, f, "image/jpeg")}
+                files = {"image": (image_file.name, f, "image/jpeg")}
+                
+                # data = {
+                #     "flight_id": self.current_flight_id,
+                #     "waypoint": "WP1"  # You'd need to extract this from filename or pass it in
+                # }
+                
                 response = requests.post(
                     IMAGE_UPLOAD_ENDPOINT, 
-                    files=files, 
-                    timeout=60
+                    files=files,
+                    # data=data,  # Uncomment if server needs additional metadata
+                    timeout=REQUEST_TIMEOUT
                 )
             
             if response.status_code in [200, 201]:
                 try:
                     response_data = response.json()
                     
-                    # Try multiple common response fields for the image URL
                     image_url = (
                         response_data.get('url') or 
                         response_data.get('image_url') or 
                         response_data.get('path') or 
                         response_data.get('file_url') or
                         response_data.get('link') or
-                        response_data.get('src')
+                        response_data.get('src') or
+                        response_data.get('filepath')
                     )
                     
                     if image_url:
-                        # CRITICAL: Link image URL to flight data
+                        # Link image URL to flight data
                         if self.current_flight_id:
                             flight_aggregator.set_image_url(
                                 self.current_flight_id,
@@ -624,8 +643,9 @@ class UploadQueue:
                 logger.warning(f"   Response: {response.text[:200]}")
                 return False
                 
-        except requests.exceptions.ConnectionError:
-            logger.debug(f"⚠ No connection - will retry: {Path(image_path).name}")
+        except requests.exceptions.ConnectionError as e:
+            logger.debug(f"⚠ Connection failed - will retry: {Path(image_path).name}")
+            logger.debug(f"   Error: {e}")
             return False
         except requests.exceptions.Timeout:
             logger.debug(f"⚠ Timeout - will retry: {Path(image_path).name}")
@@ -651,24 +671,24 @@ class UploadQueue:
         stats = self.get_stats()
         logger.info("="*60)
         logger.info("📊 UPLOAD QUEUE STATISTICS")
-        logger.info(f"   JSON: {stats['json_uploaded']}/{stats['json_queued']} uploaded, "
+        logger.info(f"  JSON: {stats['json_uploaded']}/{stats['json_queued']} uploaded, "
                     f"{stats['json_failed']} failed")
-        logger.info(f"   Images: {stats['image_uploaded']}/{stats['image_queued']} uploaded, "
+        logger.info(f"  Images: {stats['image_uploaded']}/{stats['image_queued']} uploaded, "
                     f"{stats['image_failed']} failed")
-        logger.info(f"   Pending: {stats['pending_count']}")
-        logger.info(f"   Queue size: {stats['queue_size']}")
-        logger.info(f"   Failed: {stats['failed_count']}")
-        logger.info(f"   Total uploaded: {stats['uploaded_total']}")
+        logger.info(f"  Pending: {stats['pending_count']}")
+        logger.info(f"  Queue size: {stats['queue_size']}")
+        logger.info(f"  Failed: {stats['failed_count']}")
+        logger.info(f"  Total uploaded: {stats['uploaded_total']}")
         logger.info("="*60)
 
 
 # Global upload queue instance
 upload_queue = UploadQueue()
 
+
 # ============================================================================
 # PUBLIC API FUNCTIONS
 # ============================================================================
-
 def start_new_flight(flight_id):
     """Start tracking a new flight in the aggregator"""
     flight_aggregator.start_flight(flight_id)
@@ -684,25 +704,15 @@ def add_detection_to_flight(flight_id, waypoint, image_path, detections):
 
 
 def finalize_flight_summary(flight_id, total_waypoints):
-    """Generate and save comprehensive flight summary, then upload everything
-    
-    Process:
-    1. Queue all images for upload
-    2. Enable uploading (images upload first)
-    3. Wait for images to upload and URLs to be captured
-    4. Generate JSON with collected image URLs
-    5. Upload JSON last
-    """
+    """Generate and save comprehensive flight summary, then upload everything"""
     logger.info("=" * 60)
-    logger.info("📦 FINALIZING FLIGHT SUMMARY")
+    logger.info(">>> FINALIZING FLIGHT SUMMARY")
     logger.info(f"   Flight ID: {flight_id}")
     logger.info("=" * 60)
     
-    # Check if we have any data for this flight
     if not flight_aggregator.has_flight_data(flight_id):
         logger.error(f"❌ No flight data found for {flight_id}")
         
-        # Show diagnostic info
         logger.info("   Flight info:")
         info = flight_aggregator.get_flight_info(flight_id)
         for key, value in info.items():
@@ -713,7 +723,6 @@ def finalize_flight_summary(flight_id, total_waypoints):
             finfo = flight_aggregator.get_flight_info(fid)
             logger.info(f"     - {fid}: {finfo}")
         
-        # Try to find the most recent flight with data
         for fid in sorted(flight_aggregator.flights.keys(), reverse=True):
             if flight_aggregator.has_flight_data(fid):
                 logger.info(f"   ✓ Using {fid} instead")
@@ -723,62 +732,41 @@ def finalize_flight_summary(flight_id, total_waypoints):
             logger.error("   ❌ No valid flight data found!")
             return None
     
-    # Get all images for this flight
     flight_images = flight_aggregator.get_flight_images(flight_id)
     
     logger.info(f"📸 Found {len(flight_images)} images from flight {flight_id}")
-    
-    # STEP 1: Queue all flight images for upload
-    logger.info("=" * 60)
-    logger.info("📤 STEP 1: Queuing images for upload...")
-    logger.info("=" * 60)
-    
+
+    logger.info("   📤 STEP 1: Queuing images for upload...")
     image_count = 0
     for image_path in flight_images:
         upload_queue.add_image(image_path)
         image_count += 1
         
-        # Check for detection image
         detection_path = str(image_path).replace("pinyasuri_", "detection_")
         if Path(detection_path).exists():
             upload_queue.add_image(detection_path)
             image_count += 1
-    
-    logger.info(f"✓ Queued {image_count} images")
-    
-    # STEP 2: Enable uploading (this will start uploading images)
-    logger.info("=" * 60)
-    logger.info("📤 STEP 2: Starting image uploads...")
-    logger.info("=" * 60)
-    
+    logger.info(f"      └─ ✓ Queued {image_count} images")
+    logger.info("   📤 STEP 2: Starting image uploads...")
     upload_queue.enable_uploading(flight_id)
-    
-    # STEP 3: Wait for images to upload and URLs to be captured
-    logger.info("=" * 60)
-    logger.info("⏳ STEP 3: Waiting for images to upload and URLs to be captured...")
-    logger.info("=" * 60)
-    
-    # Wait with progress updates
-    max_wait_time = 120  # 2 minutes max
-    wait_interval = 5  # Check every 5 seconds
+    logger.info("   ⏳ STEP 3: Waiting for images to upload and URLs to be captured...")
+    max_wait_time = 120
+    wait_interval = 5
     waited = 0
     last_uploaded_count = 0
     
     while waited < max_wait_time:
-        # Check upload queue status
         stats = upload_queue.get_stats()
         queue_size = stats['queue_size']
         images_uploaded = stats['image_uploaded']
         
-        # Show progress if changed
         if images_uploaded != last_uploaded_count:
-            logger.info(f"⏳ Progress: {images_uploaded}/{image_count} uploaded, {queue_size} in queue...")
+            logger.info(f"      └─ ⏳ Progress: {images_uploaded}/{image_count} uploaded, {queue_size} in queue...")
             last_uploaded_count = images_uploaded
         
-        # If queue is empty or nearly empty, we're done
-        if queue_size <= 1:  # Allow 1 item in queue (might be processing)
-            logger.info("✓ All images uploaded!")
-            time.sleep(2)  # Give a bit more time for final URL captures
+        if queue_size <= 1:
+            logger.info("       └─ ✓ All images uploaded!")
+            time.sleep(2)
             break
         
         time.sleep(wait_interval)
@@ -788,24 +776,15 @@ def finalize_flight_summary(flight_id, total_waypoints):
         logger.warning(f"⚠ Timeout waiting for uploads (waited {max_wait_time}s)")
         logger.warning("  Proceeding with available data...")
     
-    # STEP 4: Debug - Check URL mapping
-    logger.info("=" * 60)
-    logger.info("🔍 STEP 4: Checking URL mapping...")
-    logger.info("=" * 60)
-    
+    logger.info("   🔍 STEP 4: Checking URL mapping...")    
     flight_aggregator.print_url_mapping_debug(flight_id)
     
-    # STEP 5: Generate JSON with collected image URLs
-    logger.info("=" * 60)
-    logger.info("📝 STEP 5: Generating flight summary JSON with image URLs...")
-    logger.info("=" * 60)
-    
+    logger.info("   📝 STEP 5: Generating flight summary JSON with image URLs...")
     summary_path = flight_aggregator.save_flight_summary(flight_id, total_waypoints)
-    
+
     if summary_path:
-        logger.info(f"✓ Flight summary created: {summary_path}")
+        logger.info(f"      └─ ✓ Flight summary created: {summary_path}")
         
-        # Verify URLs were included
         with open(summary_path, 'r') as f:
             summary_data = json.load(f)
         
@@ -816,24 +795,20 @@ def finalize_flight_summary(flight_id, total_waypoints):
             if urls:
                 waypoints_with_urls += 1
                 total_urls += len(urls)
-        
-        logger.info(f"  └─ {waypoints_with_urls} waypoints with image URLs")
-        logger.info(f"  └─ {total_urls} total image URLs included")
+        logger.info(f"          └─ {waypoints_with_urls} waypoints with image URLs.")
+        logger.info(f"          └─ {total_urls} total image URLs included.")
         
         if total_urls == 0:
             logger.warning("  ⚠ WARNING: No image URLs were captured!")
             logger.warning("  Check your server's image upload response format")
         
-        # STEP 6: Queue JSON for upload
-        logger.info("=" * 60)
-        logger.info("📤 STEP 6: Queuing JSON for upload...")
-        logger.info("=" * 60)
+        logger.info("   📤 STEP 6: Queuing JSON for upload...")
         
         upload_queue.add_json(summary_path)
-        logger.info("✓ Flight summary queued for upload")
+        logger.info("      └─ ✓ Flight summary queued for upload.")
     
     logger.info("=" * 60)
-    logger.info("FLIGHT FINALIZATION COMPLETE")
+    logger.info("✓ FLIGHT FINALIZATION COMPLETE")
     logger.info("=" * 60)
     
     return summary_path
@@ -857,7 +832,7 @@ def disable_uploads_during_flight():
 
 def scan_and_queue_unuploaded_files():
     """Scan local directories for unuploaded files"""
-    logger.info("🔍 Scanning for unuploaded files...")
+    logger.info(">>> Scanning for unuploaded files...")
     
     json_files = list(config.JSON_DIR.glob("**/*.json"))
     image_files = list(config.IMAGE_DIR.glob("**/*.jpg"))
@@ -873,7 +848,7 @@ def scan_and_queue_unuploaded_files():
         stats = upload_queue.get_stats()
         logger.info(f"✓ Queued {stats['json_queued']} JSON + {stats['image_queued']} images")
     else:
-        logger.info("⏸️  Files found but uploads paused")
+        logger.info("  └─ Files found but uploads paused.")
 
 
 # Backward compatibility

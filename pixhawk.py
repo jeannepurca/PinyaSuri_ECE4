@@ -53,9 +53,9 @@ class Pixhawk:
     def wait_for_connection(self):
         logger.info(">>> Waiting for heartbeat...")
         self.master.wait_heartbeat()
-        logger.info("✓ Pixhawk connected successfully!")
+        logger.info("  └─ ✓ Pixhawk connected successfully!")
         self._request_required_streams()
-        logger.info("✓ MAVLink streams configured!")
+        logger.info("  └─ ✓ MAVLink streams configured!")
     
     def _request_message(self, msg_id, rate_hz):
         """Request a MAVLink message at a specific rate"""
@@ -112,7 +112,7 @@ class Pixhawk:
         msg = self.master.recv_match(type='MISSION_COUNT', blocking=True, timeout=5)
         if msg:
             self.mission_count = msg.count
-            logger.info(f"✓ Mission has {self.mission_count} waypoints (0 to {self.mission_count - 1})")
+            logger.info(f"  ✓ Mission has {self.mission_count} waypoints (0 to {self.mission_count - 1})")
             return self.mission_count
         else:
             logger.warning("⚠ Failed to get mission count")

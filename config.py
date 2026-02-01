@@ -24,14 +24,18 @@ def ensure_directories():
 # ============================================================================  
 # API ENDPOINTS
 # ============================================================================  
-# Base server URL
-SERVER_BASE = "https://finalfinaledit-pinyasuri-webdev.onrender.com"
+# --- Base server URL
+# For local server (Raspberry Pi network):
+SERVER_BASE = "http://192.168.1.16:5000"
+
+# --- For cloud server
+# SERVER_BASE = "https://finalfinaledit-pinyasuri-webdev.onrender.com"
 
 # Separate endpoints for different data types
 FLIGHT_LOG_ENDPOINT = f"{SERVER_BASE}/api/upload-flight-log"
 IMAGE_UPLOAD_ENDPOINT = f"{SERVER_BASE}/api/waypoint-image"
 
-# Legacy support (for backward compatibility)
+# Legacy support
 SERVER = FLIGHT_LOG_ENDPOINT
 
 
@@ -53,7 +57,7 @@ FLIGHT_LOG_FILE = get_flight_log_file()
 
 
 # ============================================================================  
-# IMAGE CAPTURE DIRECTORY (daily subfolders)  
+# IMAGE CAPTURE DIRECTORY  
 # ============================================================================  
 def get_image_day_dir():
     date_str = datetime.utcnow().strftime("%Y%m%d")  # YYYYMMDD

@@ -97,13 +97,13 @@ class FlightMetricsLogger:
         self.armed = True
         self.flight_start_time = datetime.now()
         self.flight_id = self._generate_flight_id()
-        logger.info(f"🛫 Flight {self.flight_id} started at {self.flight_start_time}.")
+        # logger.info(f"  🛫 Flight {self.flight_id} started at {self.flight_start_time}.")
 
     # Call when the drone disarms
     def end_flight(self):
         self.armed = False
         self.flight_end_time = datetime.now()
-        logger.info(f"🛬 Flight {self.flight_id} ended at {self.flight_end_time}.")
+        # logger.info(f"  🛬 Flight {self.flight_id} ended at {self.flight_end_time}.")
 
         # Increment flight number for next flight
         self.flight_number = get_next_daily_flight_number()
