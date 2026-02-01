@@ -569,20 +569,25 @@ class UploadQueue:
                 logger.error(f"⚠ Image file not found: {image_path}")
                 return False
             
+            # Extract waypoint from filename
+            import re
+            waypoint_match = re.search(r'_wp(\d+)_', image_file.name)
+            waypoint = f"WP{waypoint_match.group(1)}" if waypoint_match else "UNKNOWN"
+        
             logger.debug(f"📤 Uploading image to {IMAGE_UPLOAD_ENDPOINT}...")
             
             with open(image_file, "rb") as f:
                 files = {"image": (image_file.name, f, "image/jpeg")}
                 
-                # data = {
-                #     "flight_id": self.current_flight_id,
-                #     "waypoint": "WP1"  # You'd need to extract this from filename or pass it in
-                # }
+                data = {
+                    "flight_id": self.current_flight_id or "UNKNOWN",
+                    "waypoint": waypoint
+                }
                 
                 response = requests.post(
                     IMAGE_UPLOAD_ENDPOINT, 
                     files=files,
-                    # data=data,  # Uncomment if server needs additional metadata
+                    data=data,
                     timeout=REQUEST_TIMEOUT
                 )
             
