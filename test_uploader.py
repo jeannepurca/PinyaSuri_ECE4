@@ -2,7 +2,7 @@
 # test_uploader.py
 
 """
-Upload existing files with proper flight ID matching
+Upload existing files with detailed debugging
 """
 
 import sys
@@ -13,139 +13,101 @@ from pathlib import Path
 import config
 import uploader
 import time
+import requests
 
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,  # More verbose
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
 
-def extract_flight_id_from_filename(filename):
-    """Extract flight number from filename like 'pinyasuri_flight93_wp2...'"""
-    match = re.search(r'flight(\d+)', filename)
-    if match:
-        flight_num = match.group(1)
-        # Match the format used in JSON files
-        return f"20260201_F{flight_num}"
-    return None
+def check_if_already_uploaded(json_file):
+    """Check if JSON was already uploaded"""
+    if str(json_file) in uploader.upload_queue.uploaded_files:
+        return True
+    return False
 
 
-def organize_files_by_flight():
-    """Organize existing images and JSONs by flight ID"""
-    logger.info("🔍 Scanning and organizing files...")
+def upload_json_directly(json_file):
+    """Upload JSON directly without queue for testing"""
+    logger.info(f"📤 Direct JSON upload: {json_file.name}")
     
-    # Find all JSON files
-    json_files = list(config.JSON_DIR.glob("*_summary.json"))
-    json_files = [f for f in json_files if 'upload_history' not in f.name]
-    
-    # Find all images
-    image_files = list(config.IMAGE_DIR.glob("*.jpg"))
-    
-    # Organize by flight
-    flights = {}
-    
-    # Process JSONs first
-    for json_file in json_files:
+    try:
         with open(json_file, 'r') as f:
-            data = json.load(f)
-            flight_id = data.get('id')
-            
-            if flight_id:
-                flights[flight_id] = {
-                    'json': json_file,
-                    'images': [],
-                    'waypoints': [wp.get('waypoint_id') or wp.get('name') for wp in data.get('waypoints', [])]
-                }
-    
-    # Match images to flights
-    for image_file in image_files:
-        flight_id = extract_flight_id_from_filename(image_file.name)
+            json_data = json.load(f)
         
-        if flight_id and flight_id in flights:
-            flights[flight_id]['images'].append(image_file)
-        else:
-            # Orphan image - no matching JSON
-            logger.debug(f"Orphan image (no JSON): {image_file.name}")
-    
-    return flights
-
-
-def upload_flight(flight_id, flight_data):
-    """Upload a single flight's JSON and images"""
-    logger.info(f"\n{'='*60}")
-    logger.info(f"📤 Uploading Flight: {flight_id}")
-    logger.info(f"{'='*60}")
-    
-    json_file = flight_data['json']
-    images = flight_data['images']
-    waypoints = flight_data['waypoints']
-    
-    logger.info(f"   JSON: {json_file.name}")
-    logger.info(f"   Images: {len(images)}")
-    logger.info(f"   Waypoints: {', '.join(waypoints)}")
-    
-    # Step 1: Upload JSON first
-    logger.info(f"\n1️⃣  Uploading JSON to register flight...")
-    uploader.upload_queue.add_json(json_file)
-    
-    # Wait for JSON to upload
-    max_wait = 15
-    waited = 0
-    json_uploaded = False
-    
-    while waited < max_wait:
-        stats = uploader.upload_queue.get_stats()
-        if stats['json_uploaded'] > 0:
+        logger.info(f"   Flight ID in JSON: {json_data.get('id')}")
+        logger.info(f"   Waypoints: {[wp.get('waypoint_id') or wp.get('name') for wp in json_data.get('waypoints', [])]}")
+        
+        response = requests.post(
+            config.FLIGHT_LOG_ENDPOINT,
+            json=json_data,
+            timeout=30,
+            headers={"Content-Type": "application/json"}
+        )
+        
+        logger.info(f"   Response Status: {response.status_code}")
+        logger.info(f"   Response: {response.text[:500]}")
+        
+        if response.status_code in [200, 201]:
             logger.info("   ✅ JSON uploaded successfully!")
-            json_uploaded = True
-            break
-        time.sleep(1)
-        waited += 1
-    
-    if not json_uploaded:
-        logger.error("   ❌ JSON upload failed - skipping images")
+            return True
+        elif response.status_code == 409:
+            logger.info("   ℹ️  Flight already exists (409 - this is OK)")
+            return True
+        else:
+            logger.error(f"   ❌ Upload failed: {response.status_code}")
+            return False
+            
+    except Exception as e:
+        logger.error(f"   ❌ Error: {e}")
+        import traceback
+        traceback.print_exc()
         return False
+
+
+def upload_image_directly(image_file, flight_id, waypoint):
+    """Upload image directly for testing"""
+    logger.info(f"📤 Direct image upload: {image_file.name}")
+    logger.info(f"   Flight ID: {flight_id}")
+    logger.info(f"   Waypoint: {waypoint}")
     
-    # Wait a bit for server to process
-    time.sleep(2)
-    
-    # Step 2: Upload images with correct flight_id
-    logger.info(f"\n2️⃣  Uploading {len(images)} images...")
-    
-    # IMPORTANT: Set the current flight ID so images use the right one
-    uploader.upload_queue.current_flight_id = flight_id
-    
-    for image in images:
-        uploader.upload_queue.add_image(image)
-    
-    # Wait for images to upload
-    max_wait = 60
-    waited = 0
-    initial_count = stats['image_uploaded']
-    
-    while waited < max_wait:
-        stats = uploader.upload_queue.get_stats()
-        uploaded_count = stats['image_uploaded'] - initial_count
+    try:
+        with open(image_file, 'rb') as f:
+            files = {"image": (image_file.name, f, "image/jpeg")}
+            data = {
+                "flight_id": flight_id,
+                "waypoint": waypoint
+            }
+            
+            response = requests.post(
+                config.IMAGE_UPLOAD_ENDPOINT,
+                files=files,
+                data=data,
+                timeout=30
+            )
         
-        if uploaded_count >= len(images):
-            logger.info(f"   ✅ All {len(images)} images uploaded!")
-            break
+        logger.info(f"   Response Status: {response.status_code}")
+        logger.info(f"   Response: {response.text[:500]}")
         
-        if stats['queue_size'] == 0 and waited > 10:
-            logger.info(f"   ⚠️  Uploaded {uploaded_count}/{len(images)} images")
-            break
-        
-        time.sleep(2)
-        waited += 2
-    
-    logger.info(f"✅ Flight {flight_id} upload complete")
-    return True
+        if response.status_code in [200, 201]:
+            logger.info("   ✅ Image uploaded successfully!")
+            return True
+        else:
+            logger.error(f"   ❌ Upload failed: {response.status_code}")
+            return False
+            
+    except Exception as e:
+        logger.error(f"   ❌ Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
 
 
 def main():
     logger.info("="*60)
-    logger.info("📦 UPLOAD EXISTING FILES")
+    logger.info("📦 UPLOAD EXISTING FILES (DEBUG MODE)")
     logger.info("="*60)
     logger.info(f"Server: {config.SERVER_BASE}")
     logger.info("="*60)
@@ -155,56 +117,91 @@ def main():
         logger.error("❌ Server not reachable!")
         return False
     
-    # Organize files
-    flights = organize_files_by_flight()
+    # Find files
+    json_files = list(config.JSON_DIR.glob("*_summary.json"))
+    json_files = [f for f in json_files if 'upload_history' not in f.name]
     
-    if not flights:
-        logger.error("❌ No flight data found!")
-        logger.info("\nMake sure you have:")
-        logger.info(f"  • JSON files in: {config.JSON_DIR}")
-        logger.info(f"  • Images in: {config.IMAGE_DIR}")
+    if not json_files:
+        logger.error("❌ No JSON files found!")
         return False
     
-    logger.info(f"\n✅ Found {len(flights)} flight(s) to upload:")
-    for flight_id, data in flights.items():
-        logger.info(f"   • {flight_id}: {data['json'].name} + {len(data['images'])} images")
+    logger.info(f"\n📋 Found JSON files:")
+    for jf in json_files:
+        already_uploaded = check_if_already_uploaded(jf)
+        status = "✅ (already uploaded)" if already_uploaded else "📤 (needs upload)"
+        logger.info(f"   • {jf.name} {status}")
     
-    # Start upload queue
-    logger.info("\n🚀 Starting upload queue...")
-    uploader.start_upload_queue()
-    uploader.upload_queue.enable_uploading("batch_upload")
-    time.sleep(1)
+    # Get the JSON to upload
+    json_file = json_files[0]
     
-    # Upload each flight
-    success_count = 0
-    for flight_id, flight_data in flights.items():
-        if upload_flight(flight_id, flight_data):
-            success_count += 1
+    logger.info(f"\n📄 Working with: {json_file.name}")
     
-    # Wait for any remaining uploads
-    logger.info("\n⏳ Waiting for all uploads to complete...")
-    time.sleep(5)
+    # Read JSON to get flight info
+    with open(json_file, 'r') as f:
+        json_data = json.load(f)
     
-    # Show final stats
-    logger.info("\n" + "="*60)
-    logger.info("📊 FINAL STATISTICS")
+    flight_id = json_data.get('id')
+    waypoints = json_data.get('waypoints', [])
+    
+    logger.info(f"   Flight ID: {flight_id}")
+    logger.info(f"   Waypoints: {len(waypoints)}")
+    
+    # Find images for this flight
+    flight_num = re.search(r'F(\d+)', flight_id)
+    if flight_num:
+        pattern = f"*flight{flight_num.group(1)}*.jpg"
+        images = list(config.IMAGE_DIR.glob(pattern))
+        logger.info(f"   Images found: {len(images)}")
+        for img in images:
+            logger.info(f"      • {img.name}")
+    else:
+        logger.error("❌ Cannot extract flight number from flight ID")
+        return False
+    
+    # Upload JSON
+    logger.info(f"\n{'='*60}")
+    logger.info("STEP 1: Upload JSON")
     logger.info("="*60)
     
-    stats = uploader.upload_queue.get_stats()
-    logger.info(f"JSON uploaded: {stats['json_uploaded']}")
-    logger.info(f"JSON failed: {stats['json_failed']}")
-    logger.info(f"Images uploaded: {stats['image_uploaded']}")
-    logger.info(f"Images failed: {stats['image_failed']}")
-    logger.info(f"Failed (will retry): {stats['failed_count']}")
+    json_success = upload_json_directly(json_file)
     
-    # Stop queue
-    uploader.stop_upload_queue()
+    if not json_success:
+        logger.error("❌ JSON upload failed - cannot proceed")
+        return False
     
-    logger.info("\n" + "="*60)
-    if success_count == len(flights):
-        logger.info("✅ ALL FLIGHTS UPLOADED SUCCESSFULLY!")
+    # Wait for server to process
+    logger.info("\n⏳ Waiting 3 seconds for server to process...")
+    time.sleep(3)
+    
+    # Upload images
+    logger.info(f"\n{'='*60}")
+    logger.info("STEP 2: Upload Images")
+    logger.info("="*60)
+    
+    if not images:
+        logger.warning("⚠️  No images to upload")
+        return True
+    
+    # Get waypoint from JSON
+    if waypoints:
+        waypoint = waypoints[0].get('waypoint_id') or waypoints[0].get('name')
     else:
-        logger.info(f"⚠️  {success_count}/{len(flights)} flights uploaded")
+        waypoint = "WAYPOINT_2"
+    
+    logger.info(f"Using waypoint: {waypoint}")
+    
+    success_count = 0
+    for image in images:
+        if upload_image_directly(image, flight_id, waypoint):
+            success_count += 1
+        time.sleep(1)  # Small delay between uploads
+    
+    # Results
+    logger.info(f"\n{'='*60}")
+    logger.info("📊 RESULTS")
+    logger.info("="*60)
+    logger.info(f"JSON uploaded: {'✅' if json_success else '❌'}")
+    logger.info(f"Images uploaded: {success_count}/{len(images)}")
     logger.info("="*60)
     
     return success_count > 0
@@ -216,11 +213,9 @@ if __name__ == "__main__":
         sys.exit(0 if success else 1)
     except KeyboardInterrupt:
         logger.info("\n⚠️  Interrupted by user")
-        uploader.stop_upload_queue()
         sys.exit(1)
     except Exception as e:
         logger.error(f"\n❌ Error: {e}")
         import traceback
         traceback.print_exc()
-        uploader.stop_upload_queue()
         sys.exit(1)
