@@ -190,11 +190,6 @@ def test_upload_json_direct(json_path):
 
 
 def test_upload_image_direct(image_path):
-    """Test image upload directly to server (bypassing uploader queue)
-    
-    Returns:
-        tuple: (success: bool, image_url: str or None)
-    """
     try:
         image_file = Path(image_path)
         
@@ -206,15 +201,35 @@ def test_upload_image_direct(image_path):
         logger.info(f"📤 Testing direct image upload: {image_file.name} ({file_size_mb:.2f} MB)")
         logger.info(f"   → Endpoint: {IMAGE_UPLOAD_ENDPOINT}")
         
+        # Extract waypoint from filename if possible
+        import re
+        waypoint_match = re.search(r'_wp(\d+)_', image_file.name)
+        if waypoint_match:
+            waypoint_num = int(waypoint_match.group(1))
+            waypoint = config.get_waypoint_name(waypoint_num) if hasattr(config, 'get_waypoint_name') else f"WP{waypoint_num}"
+        else:
+            waypoint = "WP1"  # Default for testing
+        
+        # Test flight ID
+        test_flight_id = f"TEST_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        
+        logger.info(f"   → Flight ID: {test_flight_id}")
+        logger.info(f"   → Waypoint: {waypoint}")
+        
         # Match server's expected field name
-        # Common field names: "image", "file", "upload", "picture"
         with open(image_file, "rb") as f:
-            # Try "image" first (matches your sample code)
             files = {"image": (image_file.name, f, "image/jpeg")}
+            
+            # Include required data fields
+            data = {
+                "flight_id": test_flight_id,
+                "waypoint": waypoint
+            }
             
             response = requests.post(
                 IMAGE_UPLOAD_ENDPOINT,
                 files=files,
+                data=data,
                 timeout=60
             )
         
