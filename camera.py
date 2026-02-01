@@ -36,17 +36,17 @@ class Camera:
         self.classifier = classifier
 
     def capture(self, waypoint: int, flight_number: int = 1, prefix="img", burst_index=0):
-        """Capture image and save to today's date folder"""
+        """Capture image and save to image folder"""
 
-        # Get today's folder
-        date_folder = config.get_image_day_dir()
+        # Get image folder
+        image_folder = config.get_image_day_dir()
 
         # Timestamp for filename
         ts = datetime.utcnow().strftime("%Y%m%dT%H%M%S%f")[:-3]
 
         # Include burst index in filename
         filename = f"{prefix}_flight{flight_number}_wp{waypoint}_burst{burst_index}_{ts}.jpg"
-        fullpath = date_folder / filename
+        fullpath = image_folder / filename
 
         try:
             self.picam2.capture_file(str(fullpath))
@@ -61,15 +61,15 @@ class Camera:
                           flight_number: int = 1, prefix="cropped", burst_index=0):
         """Save the cropped square image (from classifier)"""
         try:
-            # Get today's folder
-            date_folder = config.get_image_day_dir()
+            # Get image folder
+            image_folder = config.get_image_day_dir()
 
             # Timestamp for filename
             ts = datetime.utcnow().strftime("%Y%m%dT%H%M%S%f")[:-3]
             
             # Create filename for cropped image
             filename = f"{prefix}_flight{flight_number}_wp{waypoint}_burst{burst_index}_{ts}.jpg"
-            fullpath = date_folder / filename
+            fullpath = image_folder / filename
 
             # Save cropped image
             success = cv2.imwrite(str(fullpath), cropped_frame)
@@ -98,15 +98,15 @@ class Camera:
             logger.debug(f"Cropped frame shape: {cropped_frame.shape}")
             logger.debug(f"Number of detections: {len(detections)}")
 
-            # Get today's folder
-            date_folder = config.get_image_day_dir()
+            # Get image folder
+            image_folder = config.get_image_day_dir()
 
             # Timestamp for filename
             ts = datetime.utcnow().strftime("%Y%m%dT%H%M%S%f")[:-3]
             
             # Create filename for detection image
             filename = f"{prefix}_flight{flight_number}_wp{waypoint}_burst{burst_index}_{ts}.jpg"
-            fullpath = date_folder / filename
+            fullpath = image_folder / filename
 
             # Make a copy to draw on
             frame = cropped_frame.copy()

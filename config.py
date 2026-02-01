@@ -59,13 +59,11 @@ FLIGHT_LOG_FILE = get_flight_log_file()
 
 
 # ============================================================================  
-# IMAGE CAPTURE DIRECTORY  
+# IMAGE CAPTURE DIRECTORY
 # ============================================================================  
 def get_image_day_dir():
-    date_str = datetime.utcnow().strftime("%Y%m%d")  # YYYYMMDD
-    day_folder = IMAGE_DIR / date_str
-    day_folder.mkdir(parents=True, exist_ok=True)
-    return day_folder
+    """Return the base image directory (daily folders removed)"""
+    return IMAGE_DIR
 
 
 # ============================================================================  
@@ -75,7 +73,7 @@ PIXHAWK_ADDRESS = "/dev/ttyAMA0"
 
 
 # ============================================================================  
-# MISSION WAYPOINT DEFINITIONS  
+# MISSION WAYPOINT DEFINITIONS
 # ============================================================================  
 WP_HOME = 0
 WP_TAKEOFF = 1

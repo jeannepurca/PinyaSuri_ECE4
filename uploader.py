@@ -298,7 +298,7 @@ class FlightDataAggregator:
             
             summary = self.generate_flight_summary(flight_id, total_waypoints)
             
-            summary_dir = config.JSON_DIR / "flight_summaries"
+            summary_dir = config.JSON_DIR
             summary_dir.mkdir(parents=True, exist_ok=True)
             
             filename = f"{flight_id}_summary.json"
