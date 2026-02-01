@@ -247,9 +247,11 @@ class FlightDataAggregator:
             
             waypoint_entry = {
                 'waypoint_id': waypoint_name,
+                'name': waypoint_name,
                 'image': primary_image_url,
                 'images': waypoint_image_urls,
                 'num_pineapples': wp_data['total_pineapples'],
+                'total': wp_data['total_pineapples'],
                 'healthy': wp_data['healthy'],
                 'afflicted': wp_data['afflicted'],
                 'afflictions': dict(wp_data['afflictions'])
