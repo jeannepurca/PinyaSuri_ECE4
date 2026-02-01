@@ -465,20 +465,22 @@ def handle_arm_state_change(pixhawk, metrics, was_armed, flight_number, captured
         
         metrics.end_flight()
         
-        total_waypoints = pixhawk.get_last_waypoint() if pixhawk else 0
-        logger.info(">>> Generating flight summary...")
-        
-        # Use the flight_id from WHEN THE FLIGHT WAS ACTIVE
-        summary_path = uploader.finalize_flight_summary(current_flight_id, total_waypoints)
-        
-        if summary_path:
-            logger.info(f"✓ Flight summary created.")
-            logger.info(f"✓ All flight data queued for upload.")
+        # Check if we actually have flight data before generating summary
+        if uploader.flight_aggregator.has_flight_data(current_flight_id):
+            total_waypoints = pixhawk.get_last_waypoint() if pixhawk else 0
+            logger.info(">>> Generating flight summary...")
+            
+            summary_path = uploader.finalize_flight_summary(current_flight_id, total_waypoints)
+            
+            if summary_path:
+                logger.info(f"✓ Flight summary created.")
+                logger.info(f"✓ All flight data queued for upload.")
+        else:
+            logger.info(">>> No flight data captured - skipping summary generation")
         
         captured_wp.clear()
         pixhawk.clear_waypoint_log()
         
-        # When disarmed
         return False, metrics.flight_number, False
     
     # No change
@@ -679,15 +681,17 @@ def cleanup(camera, pixhawk, metrics, was_armed, logger):
         
         metrics.end_flight()
         
-        # Generate flight summary JSON
-        total_waypoints = pixhawk.get_last_waypoint() if pixhawk else 0
-        logger.info(">>> Generating flight summary...")
-        
-        # Use the flight_id from when flight was active
-        summary_path = uploader.finalize_flight_summary(current_flight_id, total_waypoints)
-        
-        if summary_path:
-            logger.info(f"✓ Flight summary created: {summary_path}")
+        # Check if we actually have flight data before generating summary
+        if uploader.flight_aggregator.has_flight_data(current_flight_id):
+            total_waypoints = pixhawk.get_last_waypoint() if pixhawk else 0
+            logger.info(">>> Generating flight summary...")
+            
+            summary_path = uploader.finalize_flight_summary(current_flight_id, total_waypoints)
+            
+            if summary_path:
+                logger.info(f"✓ Flight summary created: {summary_path}")
+        else:
+            logger.info(">>> No flight data captured - skipping summary generation")
 
     # Cleanup camera
     try:
