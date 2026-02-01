@@ -572,7 +572,12 @@ class UploadQueue:
             # Extract waypoint from filename
             import re
             waypoint_match = re.search(r'_wp(\d+)_', image_file.name)
-            waypoint = f"WP{waypoint_match.group(1)}" if waypoint_match else "UNKNOWN"
+            if waypoint_match:
+                # Match whatever format your logs use
+                waypoint_num = waypoint_match.group(1)
+                waypoint = config.get_waypoint_name(int(waypoint_num))  # Use config function
+            else:
+                waypoint = "UNKNOWN"
         
             logger.debug(f"📤 Uploading image to {IMAGE_UPLOAD_ENDPOINT}...")
             
