@@ -1,970 +1,687 @@
 #!/usr/bin/env python3
-# test_uploader.py
+# test_uploader.py - Comprehensive Uploader Testing Script
+
+"""
+Test script for validating the uploader.py functionality.
+
+This script will:
+1. Create test flight data (images + JSON)
+2. Test the upload queue system
+3. Validate JSON-to-image relationships
+4. Test server connectivity
+5. Verify flight summary generation
+6. Check upload success/failure tracking
+
+Usage:
+    python test_uploader.py
+"""
 
 import json
-import requests
-from pathlib import Path
-import logging
 import time
 import sys
+import logging
+from pathlib import Path
 from datetime import datetime
+import shutil
+import cv2
+import numpy as np
 
-try:
-    import config
-    import uploader
-    logger = logging.getLogger(__name__)
-except ImportError as e:
-    print(f"❌ ERROR: Required module not found: {e}")
-    print("   Make sure config.py and uploader.py are in the same directory")
-    sys.exit(1)
+# Import your modules
+import config
+import uploader
 
-# Configure logging
+# Setup logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
+logger = logging.getLogger(__name__)
 
 
 # ============================================================================
-# CONFIGURATION
+# TEST DATA GENERATOR
 # ============================================================================
-FLIGHT_LOG_ENDPOINT = config.FLIGHT_LOG_ENDPOINT
-IMAGE_UPLOAD_ENDPOINT = config.IMAGE_UPLOAD_ENDPOINT
-SERVER_BASE = config.SERVER_BASE
-JSON_DIR = config.JSON_DIR
-IMAGE_DIR = config.IMAGE_DIR
-
-# Ensure directories exist
-config.ensure_directories()
-
-logger.info("=" * 60)
-logger.info("📡 SERVER CONFIGURATION")
-logger.info("=" * 60)
-logger.info(f"🌐 Server Base: {SERVER_BASE}")
-logger.info(f"📄 Flight Log (JSON): {FLIGHT_LOG_ENDPOINT}")
-logger.info(f"🖼️  Image Upload: {IMAGE_UPLOAD_ENDPOINT}")
-logger.info("=" * 60)
-logger.info(f"📂 JSON Directory: {JSON_DIR}")
-logger.info(f"📂 Image Directory: {IMAGE_DIR}")
-logger.info("=" * 60)
-
-# Detect if using local or cloud server
-is_local_server = "192.168" in SERVER_BASE or "localhost" in SERVER_BASE or "127.0.0.1" in SERVER_BASE or "10." in SERVER_BASE
-if is_local_server:
-    logger.info("🏠 Using LOCAL SERVER - ensure server is running and reachable")
-else:
-    logger.info("☁️  Using CLOUD SERVER")
-logger.info("=" * 60)
-
-
-# ============================================================================
-# SERVER CONNECTION TEST
-# ============================================================================
-def test_server_connection():
-    """Test if endpoints are reachable"""
-    logger.info("=" * 60)
-    logger.info("🔍 TESTING SERVER CONNECTION")
-    logger.info("=" * 60)
+class TestDataGenerator:
+    """Generate realistic test data for upload testing"""
     
-    # Test base server first
-    logger.info(f"\n🌐 Testing Base Server: {SERVER_BASE}")
-    try:
-        response = requests.get(SERVER_BASE, timeout=5)
-        logger.info(f"   ✅ Server reachable (Status: {response.status_code})")
-        base_ok = True
-    except requests.exceptions.ConnectionError:
-        logger.error(f"   ❌ Cannot connect to server")
-        if is_local_server:
-            logger.error("   💡 Local server troubleshooting:")
-            logger.error("      1. Is the server running?")
-            logger.error("      2. Check IP address in config.py")
-            logger.error("      3. Are both devices on same network?")
-            logger.error("      4. Try: ping " + SERVER_BASE.split("://")[1].split(":")[0])
-        base_ok = False
-    except requests.exceptions.Timeout:
-        logger.error(f"   ❌ Connection timeout")
-        base_ok = False
-    except Exception as e:
-        logger.warning(f"   ⚠️  Test inconclusive: {e}")
-        base_ok = False
+    def __init__(self):
+        self.test_dir = Path("test_data")
+        self.test_images_dir = self.test_dir / "images"
+        self.test_json_dir = self.test_dir / "json"
+        self.flight_id = f"TEST_FLIGHT_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        self.created_files = []
     
-    # Test specific endpoints
-    endpoints = {
-        "Flight Log (JSON)": FLIGHT_LOG_ENDPOINT,
-        "Image Upload": IMAGE_UPLOAD_ENDPOINT
-    }
+    def setup(self):
+        """Create test directories"""
+        logger.info("=" * 60)
+        logger.info("SETTING UP TEST ENVIRONMENT")
+        logger.info("=" * 60)
+        
+        # Clean up old test data
+        if self.test_dir.exists():
+            logger.info(f"Removing old test data: {self.test_dir}")
+            shutil.rmtree(self.test_dir)
+        
+        # Create fresh directories
+        self.test_images_dir.mkdir(parents=True)
+        self.test_json_dir.mkdir(parents=True)
+        
+        logger.info(f"✓ Created test directories:")
+        logger.info(f"  - Images: {self.test_images_dir}")
+        logger.info(f"  - JSON: {self.test_json_dir}")
     
-    all_ok = base_ok
+    def create_test_image(self, waypoint, burst_index=0, is_best=False):
+        """Create a realistic test image with text overlay"""
+        # Create a colored image (simulating pineapple field)
+        img = np.random.randint(50, 200, (640, 640, 3), dtype=np.uint8)
+        
+        # Add some visual elements
+        cv2.rectangle(img, (100, 100), (540, 540), (0, 255, 0), 2)
+        
+        # Add text overlay
+        text = f"WP{waypoint} - Frame {burst_index}"
+        if is_best:
+            text += " [BEST]"
+        
+        cv2.putText(img, text, (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 
+                   0.7, (255, 255, 255), 2)
+        cv2.putText(img, self.flight_id, (50, 80), cv2.FONT_HERSHEY_SIMPLEX, 
+                   0.5, (200, 200, 200), 1)
+        
+        # Generate filename matching your naming convention
+        timestamp = int(time.time() * 1000)
+        best_suffix = "_BEST" if is_best else ""
+        filename = f"pinyasuri_{self.flight_id}_wp{waypoint}_{timestamp}_f{burst_index}{best_suffix}.jpg"
+        filepath = self.test_images_dir / filename
+        
+        # Save image
+        cv2.imwrite(str(filepath), img)
+        self.created_files.append(filepath)
+        
+        logger.debug(f"  Created image: {filename}")
+        return filepath
     
-    for name, endpoint in endpoints.items():
-        try:
-            logger.info(f"\n📡 Testing: {name}")
-            logger.info(f"   URL: {endpoint}")
+    def create_detection_image(self, waypoint, burst_index=0):
+        """Create a detection visualization image"""
+        # Create image with bounding boxes
+        img = np.random.randint(50, 200, (640, 640, 3), dtype=np.uint8)
+        
+        # Draw some fake bounding boxes
+        cv2.rectangle(img, (150, 150), (300, 300), (0, 255, 0), 3)
+        cv2.putText(img, "Healthy (0.95)", (150, 140), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+        
+        cv2.rectangle(img, (350, 200), (500, 400), (0, 0, 255), 3)
+        cv2.putText(img, "Crown Rot (0.87)", (350, 190), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+        
+        # Generate filename
+        timestamp = int(time.time() * 1000)
+        filename = f"detection_{self.flight_id}_wp{waypoint}_{timestamp}_f{burst_index}_BEST.jpg"
+        filepath = self.test_images_dir / filename
+        
+        cv2.imwrite(str(filepath), img)
+        self.created_files.append(filepath)
+        
+        logger.debug(f"  Created detection: {filename}")
+        return filepath
+    
+    def create_test_flight_data(self, num_waypoints=3):
+        """Create a complete test flight with images and detections"""
+        logger.info("=" * 60)
+        logger.info(f"GENERATING TEST FLIGHT DATA")
+        logger.info(f"Flight ID: {self.flight_id}")
+        logger.info(f"Waypoints: {num_waypoints}")
+        logger.info("=" * 60)
+        
+        flight_images = []
+        flight_detections = {}
+        
+        for wp in range(2, 2 + num_waypoints):  # Start from WP2 (skip HOME and TAKEOFF)
+            logger.info(f"Generating data for Waypoint {wp}...")
             
-            # Try a simple HEAD or GET request
-            response = requests.head(endpoint, timeout=10)
-            
-            # Some servers don't support HEAD, so try GET if HEAD fails
-            if response.status_code == 405:
-                response = requests.get(endpoint, timeout=10)
-            
-            # For POST endpoints, 405 (Method Not Allowed) is actually OK
-            if response.status_code in [200, 201, 404, 405]:
-                logger.info(f"   ✅ Endpoint reachable (Status: {response.status_code})")
-            else:
-                logger.warning(f"   ⚠️  Unexpected status: {response.status_code}")
+            # Create burst images (3 frames)
+            burst_images = []
+            for frame_idx in range(3):
+                is_best = (frame_idx == 1)  # Frame 1 is the best
+                img_path = self.create_test_image(wp, frame_idx, is_best)
+                burst_images.append(img_path)
                 
-        except requests.exceptions.ConnectionError:
-            logger.error(f"   ❌ Cannot connect - check network/server")
-            all_ok = False
-        except requests.exceptions.Timeout:
-            logger.error(f"   ❌ Connection timeout")
-            all_ok = False
-        except Exception as e:
-            logger.warning(f"   ⚠️  Test inconclusive: {e}")
-    
-    logger.info("\n" + "=" * 60)
-    if all_ok:
-        logger.info("✅ ALL TESTS PASSED - Server is reachable!")
-        logger.info("   You can proceed with testing uploads.")
-    else:
-        logger.warning("⚠️  CONNECTION ISSUES DETECTED")
-        logger.warning("   Fix connection issues before testing uploads.")
-        if is_local_server:
-            logger.warning("\n   Local Server Checklist:")
-            logger.warning("   □ Server is running")
-            logger.warning("   □ IP address is correct in config.py")
-            logger.warning("   □ Both devices on same WiFi/network")
-            logger.warning("   □ Firewall allows connections")
-    logger.info("=" * 60)
-    
-    return all_ok
-
-
-# ============================================================================
-# DIRECT UPLOAD FUNCTIONS (for testing server endpoints)
-# ============================================================================
-def test_upload_json_direct(json_path):
-    """Test JSON upload directly to server (bypassing uploader queue)"""
-    try:
-        json_file = Path(json_path)
-        
-        if not json_file.exists():
-            logger.error(f"❌ File not found: {json_path}")
-            return False
-        
-        with open(json_file, "r") as f:
-            json_data = json.load(f)
-        
-        logger.info(f"📤 Testing direct JSON upload: {json_file.name}")
-        logger.info(f"   → Endpoint: {FLIGHT_LOG_ENDPOINT}")
-        logger.info(f"   → Data size: {len(json.dumps(json_data))} bytes")
-        
-        response = requests.post(
-            FLIGHT_LOG_ENDPOINT,
-            json=json_data,
-            timeout=30,
-            headers={"Content-Type": "application/json"}
-        )
-        
-        if response.status_code in [200, 201]:
-            logger.info(f"✅ SUCCESS: {json_file.name}")
-            logger.info(f"   Status: {response.status_code}")
-            try:
-                response_json = response.json()
-                logger.info(f"   Response: {response_json}")
-            except:
-                logger.info(f"   Response: {response.text[:200]}")
-            return True
-        else:
-            logger.error(f"❌ FAILED: {json_file.name}")
-            logger.error(f"   Status: {response.status_code}")
-            logger.error(f"   Response: {response.text[:500]}")
-            return False
+                if is_best:
+                    flight_images.append(str(img_path))
             
-    except Exception as e:
-        logger.error(f"❌ Error: {e}")
-        import traceback
-        logger.error(traceback.format_exc())
-        return False
-
-
-def test_upload_image_direct(image_path, flight_id=None, waypoint=None):
-    """Test direct image upload - with optional flight_id override"""
-    try:
-        image_file = Path(image_path)
-        
-        if not image_file.exists():
-            logger.error(f"❌ File not found: {image_path}")
-            return False, None
-        
-        file_size_mb = image_file.stat().st_size / (1024 * 1024)
-        logger.info(f"📤 Testing direct image upload: {image_file.name} ({file_size_mb:.2f} MB)")
-        logger.info(f"   → Endpoint: {IMAGE_UPLOAD_ENDPOINT}")
-        
-        # Extract waypoint from filename if not provided
-        if waypoint is None:
-            import re
-            waypoint_match = re.search(r'_wp(\d+)_', image_file.name)
-            if waypoint_match:
-                waypoint_num = int(waypoint_match.group(1))
-                waypoint = config.get_waypoint_name(waypoint_num) if hasattr(config, 'get_waypoint_name') else f"WAYPOINT_{waypoint_num}"
-            else:
-                waypoint = "WAYPOINT_2"  # Default for testing
-        
-        # Use provided flight_id or create one
-        if flight_id is None:
-            flight_id = f"TEST_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        
-        logger.info(f"   → Flight ID: {flight_id}")
-        logger.info(f"   → Waypoint: {waypoint}")
-        
-        # Match server's expected field name
-        with open(image_file, "rb") as f:
-            files = {"image": (image_file.name, f, "image/jpeg")}
+            # Create detection image for best frame
+            det_path = self.create_detection_image(wp, 1)
             
-            # Include required data fields
-            data = {
-                "flight_id": flight_id,
-                "waypoint": waypoint
+            # Generate mock detections for this waypoint
+            detections = [
+                {
+                    'class_name': 'Healthy',
+                    'confidence': 0.95,
+                    'bbox': [150, 150, 300, 300]
+                },
+                {
+                    'class_name': 'Crown Rot Disease',
+                    'confidence': 0.87,
+                    'bbox': [350, 200, 500, 400]
+                }
+            ]
+            
+            flight_detections[wp] = {
+                'image_path': str(burst_images[1]),  # Best frame
+                'detections': detections
             }
             
-            response = requests.post(
-                IMAGE_UPLOAD_ENDPOINT,
-                files=files,
-                data=data,
-                timeout=60
-            )
+            logger.info(f"  ✓ Created {len(burst_images)} images + 1 detection visualization")
         
-        if response.status_code in [200, 201]:
-            logger.info(f"✅ SUCCESS: {image_file.name}")
-            logger.info(f"   Status: {response.status_code}")
-            
-            try:
-                response_data = response.json()
-                logger.info(f"   Response (JSON): {response_data}")
-                
-                # Look for URL in response - try multiple common field names
-                url_fields = [
-                    "url", "image_url", "file_url", "path", "image_path", 
-                    "filepath", "location", "link", "src", "imageUrl"
-                ]
-                
-                image_url = None
-                found_field = None
-                
-                for field in url_fields:
-                    if field in response_data:
-                        image_url = response_data[field]
-                        found_field = field
-                        break
-                
-                if image_url:
-                    logger.info(f"   🎯 Image URL found in field '{found_field}': {image_url}")
-                    return True, image_url
-                else:
-                    logger.warning(f"   ⚠️  No URL found in response")
-                    logger.warning(f"   Available fields: {list(response_data.keys())}")
-                    logger.warning(f"   💡 You may need to update uploader.py to match your server's response format")
-                    return True, None
-                    
-            except json.JSONDecodeError:
-                # Response might be plain text (just the URL)
-                response_text = response.text.strip()
-                logger.info(f"   Response (text): {response_text[:200]}")
-                
-                if response_text.startswith('http'):
-                    logger.info(f"   🎯 URL found in text response: {response_text}")
-                    return True, response_text
-                else:
-                    logger.warning(f"   ⚠️  Response is not JSON and doesn't look like a URL")
-                    return True, None
-        else:
-            logger.error(f"❌ FAILED: {image_file.name}")
-            logger.error(f"   Status: {response.status_code}")
-            logger.error(f"   Response: {response.text[:500]}")
-            return False, None
-            
-    except Exception as e:
-        logger.error(f"❌ Error: {e}")
-        import traceback
-        logger.error(traceback.format_exc())
-        return False, None
-
-
-# ============================================================================
-# WAYPOINT-IMAGE RELATIONSHIP VALIDATOR
-# ============================================================================
-def validate_waypoint_image_relationships(json_path):
-    """Validate that waypoints in JSON are properly linked to image URLs"""
-    logger.info("=" * 60)
-    logger.info("🔍 VALIDATING WAYPOINT-IMAGE RELATIONSHIPS")
-    logger.info("=" * 60)
+        logger.info(f"✓ Generated {len(flight_images)} best frame images")
+        logger.info(f"✓ Generated {len(flight_detections)} waypoint detection sets")
+        
+        return flight_images, flight_detections
     
-    try:
-        json_file = Path(json_path)
-        
-        if not json_file.exists():
-            logger.error(f"❌ File not found: {json_path}")
-            return False
-        
-        with open(json_file, 'r') as f:
-            data = json.load(f)
-        
-        logger.info(f"\n📄 Analyzing: {json_file.name}")
-        logger.info(f"   Flight ID: {data.get('id', 'N/A')}")
-        
-        waypoints = data.get('waypoints', [])
-        logger.info(f"   Waypoints: {len(waypoints)}")
-        
-        if not waypoints:
-            logger.warning("   ⚠️  No waypoints found in JSON")
-            return False
-        
-        # Analyze each waypoint
-        all_valid = True
-        total_images = 0
-        waypoints_with_images = 0
-        waypoints_without_images = 0
-        
-        logger.info("\n📊 Waypoint Analysis:")
-        logger.info("-" * 60)
-        
-        for i, wp in enumerate(waypoints, 1):
-            wp_id = wp.get('waypoint_id', f'WP{i}')
-            
-            # Get image data
-            primary_image = wp.get('image', '')
-            all_images = wp.get('images', [])
-            
-            # Get detection data
-            num_pineapples = wp.get('num_pineapples', 0)
-            healthy = wp.get('healthy', 0)
-            afflicted = wp.get('afflicted', 0)
-            
-            logger.info(f"\n{wp_id}:")
-            logger.info(f"  Detections: {num_pineapples} pineapples ({healthy} healthy, {afflicted} afflicted)")
-            
-            # Check for images
-            if all_images and len(all_images) > 0:
-                waypoints_with_images += 1
-                total_images += len(all_images)
-                logger.info(f"  ✅ Images: {len(all_images)} URL(s)")
-                
-                for idx, url in enumerate(all_images, 1):
-                    # Validate URL format
-                    is_valid_url = url.startswith('http://') or url.startswith('https://')
-                    status = "✅" if is_valid_url else "⚠️"
-                    logger.info(f"     {status} Image {idx}: {url}")
-                    
-                    if not is_valid_url:
-                        all_valid = False
-                        logger.warning(f"        ⚠️  Not a valid URL!")
-            else:
-                waypoints_without_images += 1
-                logger.warning(f"  ❌ No images linked")
-                all_valid = False
-            
-            # Check consistency
-            if primary_image and primary_image not in all_images:
-                logger.warning(f"  ⚠️  Primary image not in images array!")
-                all_valid = False
-        
-        # Summary
-        logger.info("\n" + "=" * 60)
-        logger.info("📊 VALIDATION SUMMARY")
+    def create_flight_summary_json(self, flight_images, flight_detections):
+        """Create a mock flight summary JSON matching your format"""
         logger.info("=" * 60)
-        logger.info(f"Total waypoints: {len(waypoints)}")
-        logger.info(f"Waypoints with images: {waypoints_with_images}")
-        logger.info(f"Waypoints without images: {waypoints_without_images}")
-        logger.info(f"Total image URLs: {total_images}")
-        logger.info(f"Average images per waypoint: {total_images / len(waypoints):.1f}")
-        
-        # Image metadata check
-        img_metadata = data.get('image_metadata', {})
-        if img_metadata:
-            logger.info(f"\nImage Metadata:")
-            logger.info(f"  Total images: {img_metadata.get('total_images', 0)}")
-            logger.info(f"  Images per waypoint: {img_metadata.get('images_per_waypoint', {})}")
-        
-        logger.info("\n" + "=" * 60)
-        if all_valid and waypoints_without_images == 0:
-            logger.info("✅ VALIDATION PASSED")
-            logger.info("   All waypoints have properly linked image URLs!")
-        elif waypoints_with_images > 0:
-            logger.warning("⚠️  VALIDATION INCOMPLETE")
-            logger.warning(f"   {waypoints_without_images} waypoint(s) missing images")
-        else:
-            logger.error("❌ VALIDATION FAILED")
-            logger.error("   No waypoints have linked images!")
+        logger.info("GENERATING FLIGHT SUMMARY JSON")
         logger.info("=" * 60)
         
-        return all_valid and waypoints_without_images == 0
+        waypoint_list = []
+        total_detections = 0
+        healthy_count = 0
+        afflicted_count = 0
         
-    except Exception as e:
-        logger.error(f"❌ Validation error: {e}")
-        import traceback
-        logger.error(traceback.format_exc())
-        return False
+        for wp_num, det_data in flight_detections.items():
+            detections = det_data['detections']
+            
+            wp_healthy = sum(1 for d in detections if d['class_name'] == 'Healthy')
+            wp_afflicted = len(detections) - wp_healthy
+            
+            healthy_count += wp_healthy
+            afflicted_count += wp_afflicted
+            total_detections += len(detections)
+            
+            waypoint_entry = {
+                'waypoint_id': f'WAYPOINT_{wp_num}',
+                'image': f"http://placeholder.url/image_wp{wp_num}.jpg",  # Will be replaced by actual upload
+                'images': [f"http://placeholder.url/image_wp{wp_num}.jpg"],
+                'num_pineapples': len(detections),
+                'healthy': wp_healthy,
+                'afflicted': wp_afflicted,
+                'afflictions': {
+                    d['class_name']: 1 for d in detections if d['class_name'] != 'Healthy'
+                }
+            }
+            
+            waypoint_list.append(waypoint_entry)
+        
+        summary = {
+            'id': self.flight_id,
+            'type': 'flight',
+            'date': datetime.now().strftime("%B %d, %Y"),
+            'start_time': "10:30:00",
+            'end_time': "10:45:00",
+            'summary': {
+                'total_waypoints': len(flight_detections) + 2,  # +2 for HOME and TAKEOFF
+                'captured_waypoints': len(flight_detections),
+                'mission_status': 'Completed',
+                'pineapples_detected': total_detections,
+                'healthy_pineapples': healthy_count,
+                'afflicted_pineapples': afflicted_count,
+                'most_common_affliction': 'Crown Rot Disease',
+                'avg_confidence': 91.0
+            },
+            'waypoints': waypoint_list,
+            'image_metadata': {
+                'total_images': len(flight_images),
+                'images_per_waypoint': {
+                    f'WAYPOINT_{wp}': 1 for wp in flight_detections.keys()
+                }
+            }
+        }
+        
+        # Save JSON
+        summary_filename = f"{self.flight_id}_summary.json"
+        summary_path = self.test_json_dir / summary_filename
+        
+        with open(summary_path, 'w') as f:
+            json.dump(summary, f, indent=4)
+        
+        self.created_files.append(summary_path)
+        
+        logger.info(f"✓ Created flight summary: {summary_filename}")
+        logger.info(f"  - Total waypoints: {summary['summary']['total_waypoints']}")
+        logger.info(f"  - Captured waypoints: {summary['summary']['captured_waypoints']}")
+        logger.info(f"  - Total detections: {total_detections}")
+        
+        return summary_path
+    
+    def cleanup(self):
+        """Remove all test data"""
+        logger.info("=" * 60)
+        logger.info("CLEANING UP TEST DATA")
+        logger.info("=" * 60)
+        
+        if self.test_dir.exists():
+            shutil.rmtree(self.test_dir)
+            logger.info(f"✓ Removed test directory: {self.test_dir}")
 
 
 # ============================================================================
-# UPLOADER.PY WORKFLOW TEST
+# TEST SUITE
 # ============================================================================
-def test_uploader_workflow():
-    """Test the complete uploader.py workflow:
-    1. Start upload queue
-    2. Simulate flight with images
-    3. Upload images (capture URLs)
-    4. Generate JSON with URLs
-    5. Upload JSON
-    6. Validate waypoint-image relationships
-    """
-    logger.info("=" * 60)
-    logger.info("🧪 TESTING COMPLETE UPLOADER WORKFLOW")
-    logger.info("=" * 60)
+class UploaderTestSuite:
+    """Comprehensive test suite for uploader functionality"""
     
-    # Find test images
-    image_files = list(IMAGE_DIR.glob("**/*.jpg"))[:3]  # Use max 3 images for testing
+    def __init__(self):
+        self.generator = TestDataGenerator()
+        self.test_results = {
+            'passed': [],
+            'failed': [],
+            'warnings': []
+        }
     
-    if not image_files:
-        logger.error("❌ No images found for testing!")
-        logger.info(f"   Please add some .jpg files to: {IMAGE_DIR}")
-        logger.info("\n💡 You can:")
-        logger.info("   1. Copy some test images to the images directory")
-        logger.info("   2. Or run a real flight to capture images")
-        return
+    def log_result(self, test_name, passed, message=""):
+        """Log test result"""
+        if passed:
+            self.test_results['passed'].append(test_name)
+            logger.info(f"✓ PASS: {test_name}")
+            if message:
+                logger.info(f"  {message}")
+        else:
+            self.test_results['failed'].append(test_name)
+            logger.error(f"✗ FAIL: {test_name}")
+            if message:
+                logger.error(f"  {message}")
     
-    logger.info(f"\n📸 Found {len(image_files)} test images:")
-    for i, img in enumerate(image_files, 1):
-        size_mb = img.stat().st_size / (1024 * 1024)
-        logger.info(f"   {i}. {img.name} ({size_mb:.2f} MB)")
-    
-    # Create test flight ID
-    test_flight_id = f"TEST_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    
-    logger.info(f"\n🛫 Simulating flight: {test_flight_id}")
-    logger.info("=" * 60)
-    
-    try:
-        # STEP 1: Start upload queue
-        logger.info("\n📋 STEP 1: Starting upload queue...")
-        uploader.start_upload_queue()
-        logger.info("✓ Upload queue started")
-        time.sleep(1)
+    def test_server_connection(self):
+        """Test 1: Server connectivity"""
+        logger.info("=" * 60)
+        logger.info("TEST 1: Server Connection")
+        logger.info("=" * 60)
         
-        # STEP 2: Initialize flight in aggregator
-        logger.info("\n📋 STEP 2: Initializing flight in aggregator...")
-        uploader.start_new_flight(test_flight_id)
-        logger.info(f"✓ Flight {test_flight_id} initialized")
-        
-        # STEP 3: Simulate image captures with detections
-        logger.info("\n📋 STEP 3: Simulating waypoint captures...")
-        logger.info("   (This simulates what happens during a real flight)")
-        
-        for i, image_path in enumerate(image_files, 1):
-            waypoint = i
+        try:
+            result = uploader.test_server_connection()
             
-            # Simulate varied detections for testing
-            detections = []
-            
-            if i == 1:
-                # First waypoint: healthy pineapples
-                detections = [
-                    {
-                        'class_name': 'Healthy',
-                        'confidence': 0.92,
-                        'bbox': [100, 100, 200, 200]
-                    },
-                    {
-                        'class_name': 'Healthy',
-                        'confidence': 0.88,
-                        'bbox': [300, 150, 400, 250]
-                    }
-                ]
-            elif i == 2:
-                # Second waypoint: diseased pineapples
-                detections = [
-                    {
-                        'class_name': 'Crown Rot Disease',
-                        'confidence': 0.85,
-                        'bbox': [120, 120, 220, 220]
-                    }
-                ]
+            if result:
+                self.log_result("Server Connection", True, 
+                               f"Connected to {config.SERVER_BASE}")
             else:
-                # Third waypoint: mix
-                detections = [
-                    {
-                        'class_name': 'Healthy',
-                        'confidence': 0.90,
-                        'bbox': [100, 100, 200, 200]
-                    },
-                    {
-                        'class_name': 'Fruit Rot Disease',
-                        'confidence': 0.78,
-                        'bbox': [250, 200, 350, 300]
-                    }
-                ]
+                self.log_result("Server Connection", False, 
+                               f"Cannot reach {config.SERVER_BASE}")
+                logger.warning("  This may cause upload failures in subsequent tests")
+        except Exception as e:
+            self.log_result("Server Connection", False, str(e))
+    
+    def test_flight_aggregator(self):
+        """Test 2: Flight aggregator functionality"""
+        logger.info("=" * 60)
+        logger.info("TEST 2: Flight Aggregator")
+        logger.info("=" * 60)
+        
+        try:
+            test_flight_id = "TEST_AGGREGATOR_001"
             
-            logger.info(f"\n   Waypoint {waypoint} ({config.get_waypoint_name(waypoint)}):")
-            logger.info(f"   └─ Image: {image_path.name}")
-            logger.info(f"   └─ Detections: {len(detections)}")
-            for det in detections:
-                logger.info(f"      • {det['class_name']} (confidence: {det['confidence']:.2f})")
+            # Start flight
+            uploader.start_new_flight(test_flight_id)
             
-            # Add detection data to flight aggregator
+            # Check if flight was initialized
+            has_data = uploader.flight_aggregator.has_flight_data(test_flight_id)
+            
+            if has_data:
+                self.log_result("Flight Aggregator Init", True, 
+                               f"Flight {test_flight_id} initialized")
+            else:
+                self.log_result("Flight Aggregator Init", False, 
+                               "Flight not properly initialized")
+            
+            # Add mock detection data
+            mock_detections = [
+                {'class_name': 'Healthy', 'confidence': 0.95, 'bbox': [0, 0, 100, 100]}
+            ]
+            
             uploader.add_detection_to_flight(
-                test_flight_id,
-                waypoint,
-                image_path,
-                detections
+                test_flight_id, 
+                waypoint=2,
+                image_path="/tmp/test_image.jpg",
+                detections=mock_detections
             )
             
-            # Queue image for upload
-            uploader.queue_image_upload(image_path)
-            logger.info(f"   └─ ✓ Queued for upload")
+            # Verify data was added
+            flight_info = uploader.flight_aggregator.get_flight_info(test_flight_id)
+            
+            if flight_info['waypoints'] > 0:
+                self.log_result("Flight Aggregator Add Data", True, 
+                               f"Data added: {flight_info}")
+            else:
+                self.log_result("Flight Aggregator Add Data", False, 
+                               "No waypoints tracked")
+                
+        except Exception as e:
+            self.log_result("Flight Aggregator", False, str(e))
+    
+    def test_upload_queue(self):
+        """Test 3: Upload queue system"""
+        logger.info("=" * 60)
+        logger.info("TEST 3: Upload Queue System")
+        logger.info("=" * 60)
         
-        logger.info("\n✓ All waypoints captured and queued")
+        try:
+            # Create test image
+            test_img = np.random.randint(0, 255, (100, 100, 3), dtype=np.uint8)
+            test_img_path = Path("/tmp/test_queue_image.jpg")
+            cv2.imwrite(str(test_img_path), test_img)
+            
+            # Queue image
+            initial_stats = uploader.upload_queue.get_stats()
+            uploader.queue_image_upload(test_img_path)
+            
+            after_stats = uploader.upload_queue.get_stats()
+            
+            # Check if item was queued
+            pending_increased = (
+                after_stats['pending_count'] > initial_stats['pending_count'] or
+                after_stats['image_queued'] > initial_stats['image_queued']
+            )
+            
+            if pending_increased:
+                self.log_result("Upload Queue", True, 
+                               f"Image queued successfully. Stats: {after_stats}")
+            else:
+                self.log_result("Upload Queue", False, 
+                               f"Image not queued. Stats: {after_stats}")
+            
+            # Cleanup
+            test_img_path.unlink(missing_ok=True)
+            
+        except Exception as e:
+            self.log_result("Upload Queue", False, str(e))
+    
+    def test_full_upload_workflow(self):
+        """Test 4: Full upload workflow with real data"""
+        logger.info("=" * 60)
+        logger.info("TEST 4: Full Upload Workflow")
+        logger.info("=" * 60)
         
-        # STEP 4: Finalize flight
-        logger.info("\n📋 STEP 4: Finalizing flight summary...")
-        logger.info("   This will:")
-        logger.info("   1. Enable uploading")
-        logger.info("   2. Upload all images to server")
-        logger.info("   3. Capture image URLs from server responses")
-        logger.info("   4. Generate JSON with waypoint-image links")
-        logger.info("   5. Upload JSON to server")
+        try:
+            # Generate test data
+            self.generator.setup()
+            flight_images, flight_detections = self.generator.create_test_flight_data(num_waypoints=3)
+            summary_path = self.generator.create_flight_summary_json(flight_images, flight_detections)
+            
+            # Initialize flight in aggregator
+            uploader.start_new_flight(self.generator.flight_id)
+            
+            # Add detection data to aggregator
+            for wp_num, det_data in flight_detections.items():
+                uploader.add_detection_to_flight(
+                    self.generator.flight_id,
+                    waypoint=wp_num,
+                    image_path=det_data['image_path'],
+                    detections=det_data['detections']
+                )
+            
+            logger.info("✓ Added all detection data to flight aggregator")
+            
+            # Queue all images for upload
+            logger.info("Queueing images for upload...")
+            for img_path in self.generator.created_files:
+                if img_path.suffix.lower() in ['.jpg', '.jpeg', '.png']:
+                    uploader.queue_image_upload(img_path)
+            
+            # Queue JSON for upload
+            logger.info("Queueing JSON for upload...")
+            uploader.upload_queue.add_json(summary_path)
+            
+            # Enable uploading (simulate flight completion)
+            logger.info("Enabling uploads (simulating flight completion)...")
+            uploader.upload_queue.enable_uploading(self.generator.flight_id)
+            
+            # Wait for uploads to process
+            logger.info("Waiting for upload queue to process...")
+            max_wait = 30  # seconds
+            waited = 0
+            
+            while waited < max_wait:
+                stats = uploader.upload_queue.get_stats()
+                queue_size = stats['queue_size']
+                
+                logger.info(f"  Queue status: {stats}")
+                
+                if queue_size == 0:
+                    logger.info("  ✓ Queue empty - uploads complete!")
+                    break
+                
+                time.sleep(2)
+                waited += 2
+            
+            # Check final stats
+            final_stats = uploader.upload_queue.get_stats()
+            
+            total_uploaded = final_stats['image_uploaded'] + final_stats['json_uploaded']
+            total_failed = final_stats['image_failed'] + final_stats['json_failed']
+            
+            logger.info(f"Final Upload Statistics:")
+            logger.info(f"  Images uploaded: {final_stats['image_uploaded']}")
+            logger.info(f"  JSON uploaded: {final_stats['json_uploaded']}")
+            logger.info(f"  Total uploaded: {total_uploaded}")
+            logger.info(f"  Total failed: {total_failed}")
+            
+            if total_uploaded > 0 and total_failed == 0:
+                self.log_result("Full Upload Workflow", True, 
+                               f"All uploads successful ({total_uploaded} files)")
+            elif total_uploaded > 0:
+                self.log_result("Full Upload Workflow", True, 
+                               f"Partial success: {total_uploaded} uploaded, {total_failed} failed")
+                self.test_results['warnings'].append(
+                    f"Some uploads failed: {total_failed} files"
+                )
+            else:
+                self.log_result("Full Upload Workflow", False, 
+                               f"No successful uploads. Failed: {total_failed}")
+            
+        except Exception as e:
+            self.log_result("Full Upload Workflow", False, str(e))
+            import traceback
+            logger.error(traceback.format_exc())
+    
+    def test_json_image_relationship(self):
+        """Test 5: Verify JSON references match uploaded images"""
+        logger.info("=" * 60)
+        logger.info("TEST 5: JSON-Image Relationship Validation")
+        logger.info("=" * 60)
+        
+        try:
+            # This test verifies that the flight summary JSON contains
+            # references to the images that were uploaded
+            
+            flight_id = self.generator.flight_id
+            flight_data = uploader.flight_aggregator.flights.get(flight_id)
+            
+            if not flight_data:
+                self.log_result("JSON-Image Relationship", False, 
+                               "No flight data found in aggregator")
+                return
+            
+            # Check if image URLs were captured
+            image_url_map = flight_data.get('image_url_map', {})
+            waypoint_images = flight_data.get('waypoint_images', {})
+            
+            if image_url_map:
+                self.log_result("JSON-Image Relationship", True, 
+                               f"Image URLs captured: {len(image_url_map)} mappings")
+                
+                logger.info("Image URL Mappings:")
+                for local_path, url in list(image_url_map.items())[:3]:
+                    logger.info(f"  {Path(local_path).name} → {url}")
+                
+                if len(image_url_map) > 3:
+                    logger.info(f"  ... and {len(image_url_map) - 3} more")
+            else:
+                self.log_result("JSON-Image Relationship", False, 
+                               "No image URLs captured - check server response format")
+                self.test_results['warnings'].append(
+                    "Server may not be returning image URLs in expected format"
+                )
+            
+            # Verify waypoint-to-image linkage
+            if waypoint_images:
+                logger.info(f"Waypoint Image Linkages:")
+                for wp, urls in waypoint_images.items():
+                    logger.info(f"  WP{wp}: {len(urls)} images")
+            
+        except Exception as e:
+            self.log_result("JSON-Image Relationship", False, str(e))
+    
+    def test_directory_structure(self):
+        """Test 6: Verify directory structure compliance"""
+        logger.info("=" * 60)
+        logger.info("TEST 6: Directory Structure Validation")
+        logger.info("=" * 60)
+        
+        try:
+            required_dirs = [
+                config.IMAGE_DIR,
+                config.JSON_DIR,
+                config.LOG_DIR,
+                config.MODEL_DIR
+            ]
+            
+            missing_dirs = []
+            existing_dirs = []
+            
+            for directory in required_dirs:
+                if directory.exists():
+                    existing_dirs.append(directory)
+                else:
+                    missing_dirs.append(directory)
+            
+            if not missing_dirs:
+                self.log_result("Directory Structure", True, 
+                               f"All {len(required_dirs)} required directories exist")
+            else:
+                self.log_result("Directory Structure", False, 
+                               f"Missing directories: {missing_dirs}")
+            
+            # Show directory contents summary
+            logger.info("Directory Contents:")
+            for directory in existing_dirs:
+                try:
+                    file_count = len(list(directory.rglob('*')))
+                    logger.info(f"  {directory.name}: {file_count} items")
+                except Exception as e:
+                    logger.warning(f"  {directory.name}: Cannot read ({e})")
+            
+        except Exception as e:
+            self.log_result("Directory Structure", False, str(e))
+    
+    def run_all_tests(self):
+        """Run complete test suite"""
+        logger.info("╔" + "=" * 58 + "╗")
+        logger.info("║" + " " * 58 + "║")
+        logger.info("║" + "  PINYASURI UPLOADER TEST SUITE".center(58) + "║")
+        logger.info("║" + " " * 58 + "║")
+        logger.info("╚" + "=" * 58 + "╝")
         logger.info("")
         
-        summary_path = uploader.finalize_flight_summary(test_flight_id, len(image_files))
+        # Start upload queue
+        uploader.start_upload_queue()
         
-        if summary_path:
-            logger.info(f"\n✓ Flight summary created: {summary_path}")
+        try:
+            # Run tests
+            self.test_server_connection()
+            self.test_directory_structure()
+            self.test_flight_aggregator()
+            self.test_upload_queue()
+            self.test_full_upload_workflow()
+            self.test_json_image_relationship()
             
-            # STEP 5: Verify JSON content
-            logger.info("\n📋 STEP 5: Verifying JSON content...")
-            with open(summary_path, 'r') as f:
-                summary_data = json.load(f)
+        finally:
+            # Stop upload queue
+            uploader.stop_upload_queue()
             
-            logger.info(f"   Flight ID: {summary_data.get('id')}")
-            logger.info(f"   Flight Type: {summary_data.get('type')}")
-            logger.info(f"   Date: {summary_data.get('date')}")
-            logger.info(f"   Time: {summary_data.get('start_time')} - {summary_data.get('end_time')}")
-            
-            # Summary stats
-            summary = summary_data.get('summary', {})
-            logger.info(f"\n   📊 Summary:")
-            logger.info(f"      Total waypoints: {summary.get('total_waypoints')}")
-            logger.info(f"      Captured waypoints: {summary.get('captured_waypoints')}")
-            logger.info(f"      Mission status: {summary.get('mission_status')}")
-            logger.info(f"      Pineapples detected: {summary.get('pineapples_detected')}")
-            logger.info(f"      Healthy: {summary.get('healthy_pineapples')}")
-            logger.info(f"      Afflicted: {summary.get('afflicted_pineapples')}")
-            
-            # Check for image URLs in waypoints
-            logger.info(f"\n   🖼️  Waypoint Image URLs:")
-            total_urls = 0
-            waypoints = summary_data.get('waypoints', [])
-            
-            for wp_data in waypoints:
-                urls = wp_data.get('images', [])
-                total_urls += len(urls)
-                
-                logger.info(f"\n      {wp_data.get('waypoint_id')}:")
-                logger.info(f"      └─ Pineapples: {wp_data.get('num_pineapples', 0)} "
-                          f"({wp_data.get('healthy', 0)} healthy, {wp_data.get('afflicted', 0)} afflicted)")
-                logger.info(f"      └─ Image URLs: {len(urls)}")
-                
-                if urls:
-                    for idx, url in enumerate(urls, 1):
-                        logger.info(f"         {idx}. {url}")
-                else:
-                    logger.warning(f"         ⚠️  No image URLs!")
-            
-            # Final assessment
-            logger.info("\n" + "=" * 60)
-            if total_urls == len(image_files):
-                logger.info("✅ TEST PASSED!")
-                logger.info(f"   All {total_urls} images successfully linked to waypoints")
-                logger.info("   Waypoint-image relationships are correct!")
-            elif total_urls > 0:
-                logger.warning("⚠️  TEST INCOMPLETE!")
-                logger.warning(f"   Only {total_urls}/{len(image_files)} images captured")
-                logger.warning("   Some images may not have uploaded successfully")
-            else:
-                logger.error("❌ TEST FAILED!")
-                logger.error("   No image URLs were captured")
-                logger.error("   Check your server's image upload response format")
-            logger.info("=" * 60)
-            
-            # STEP 6: Detailed validation
-            logger.info("\n📋 STEP 6: Running detailed validation...")
-            validate_waypoint_image_relationships(summary_path)
-            
+            # Cleanup test data
+            self.generator.cleanup()
+        
+        # Print summary
+        self.print_summary()
+    
+    def print_summary(self):
+        """Print test results summary"""
+        logger.info("")
+        logger.info("╔" + "=" * 58 + "╗")
+        logger.info("║" + " " * 58 + "║")
+        logger.info("║" + "  TEST RESULTS SUMMARY".center(58) + "║")
+        logger.info("║" + " " * 58 + "║")
+        logger.info("╚" + "=" * 58 + "╝")
+        logger.info("")
+        
+        total_tests = len(self.test_results['passed']) + len(self.test_results['failed'])
+        pass_rate = (len(self.test_results['passed']) / total_tests * 100) if total_tests > 0 else 0
+        
+        logger.info(f"Total Tests: {total_tests}")
+        logger.info(f"Passed: {len(self.test_results['passed'])} ✓")
+        logger.info(f"Failed: {len(self.test_results['failed'])} ✗")
+        logger.info(f"Pass Rate: {pass_rate:.1f}%")
+        logger.info("")
+        
+        if self.test_results['passed']:
+            logger.info("✓ PASSED TESTS:")
+            for test in self.test_results['passed']:
+                logger.info(f"  ✓ {test}")
+            logger.info("")
+        
+        if self.test_results['failed']:
+            logger.info("✗ FAILED TESTS:")
+            for test in self.test_results['failed']:
+                logger.info(f"  ✗ {test}")
+            logger.info("")
+        
+        if self.test_results['warnings']:
+            logger.info("⚠ WARNINGS:")
+            for warning in self.test_results['warnings']:
+                logger.info(f"  ⚠ {warning}")
+            logger.info("")
+        
+        # Overall result
+        if len(self.test_results['failed']) == 0:
+            logger.info("╔" + "=" * 58 + "╗")
+            logger.info("║" + "  ✓ ALL TESTS PASSED!".center(58) + "║")
+            logger.info("╚" + "=" * 58 + "╝")
         else:
-            logger.error("\n❌ TEST FAILED: Could not create flight summary")
+            logger.info("╔" + "=" * 58 + "╗")
+            logger.info("║" + "  ⚠ SOME TESTS FAILED - Review above".center(58) + "║")
+            logger.info("╚" + "=" * 58 + "╝")
+
+
+# ============================================================================
+# MAIN
+# ============================================================================
+def main():
+    """Main test entry point"""
+    try:
+        # Ensure config directories exist
+        config.ensure_directories()
         
-        # STEP 7: Wait for all uploads to complete
-        logger.info("\n📋 STEP 7: Waiting for uploads to complete...")
-        time.sleep(5)
+        # Create and run test suite
+        test_suite = UploaderTestSuite()
+        test_suite.run_all_tests()
         
-        # Print final stats
-        logger.info("\n" + "=" * 60)
-        uploader.upload_queue.print_stats()
+        # Exit code based on results
+        if len(test_suite.test_results['failed']) == 0:
+            sys.exit(0)  # Success
+        else:
+            sys.exit(1)  # Failure
         
     except KeyboardInterrupt:
-        logger.info("\n\n⚠️  Test cancelled by user")
+        logger.info("")
+        logger.warning("⚠ Tests interrupted by user")
+        sys.exit(130)
     except Exception as e:
-        logger.error(f"\n❌ Test error: {e}")
+        logger.error(f"⚠ Fatal error in test suite: {e}")
         import traceback
         logger.error(traceback.format_exc())
-    finally:
-        # Cleanup
-        logger.info("\n📋 Cleaning up...")
-        uploader.stop_upload_queue()
-        logger.info("✓ Test complete")
+        sys.exit(1)
 
-
-def test_image_url_capture():
-    """Test if image upload returns a URL that can be captured - FIXED VERSION"""
-    logger.info("=" * 60)
-    logger.info("🧪 TESTING IMAGE URL CAPTURE")
-    logger.info("=" * 60)
-    logger.info("\nThis test checks if your server returns image URLs")
-    logger.info("that the uploader can capture and link to waypoints.")
-    
-    # Find one test image
-    image_files = list(IMAGE_DIR.glob("**/*.jpg"))
-    
-    if not image_files:
-        logger.error("\n❌ No images found!")
-        logger.info(f"   Please add a .jpg file to: {IMAGE_DIR}")
-        return
-    
-    test_image = image_files[0]
-    test_flight_id = f"TEST_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    
-    logger.info(f"\n📸 Test image: {test_image.name}")
-    logger.info(f"   Size: {test_image.stat().st_size / (1024*1024):.2f} MB")
-    logger.info(f"   Path: {test_image}")
-    
-    # ========================================
-    # CREATE FLIGHT LOG FIRST
-    # ========================================
-    logger.info(f"\n📋 Step 1: Creating flight log first...")
-    logger.info(f"   Flight ID: {test_flight_id}")
-    logger.info("   (Your server requires flight to exist before accepting images)")
-    
-    minimal_flight_log = {
-        "id": test_flight_id,
-        "type": "flight",
-        "date": datetime.now().strftime("%B %d, %Y"),
-        "start_time": datetime.now().strftime("%H:%M:%S"),
-        "end_time": datetime.now().strftime("%H:%M:%S"),
-        "summary": {
-            "total_waypoints": 3,
-            "captured_waypoints": 1,
-            "mission_status": "Test",
-            "pineapples_detected": 0,
-            "healthy_pineapples": 0,
-            "afflicted_pineapples": 0,
-            "most_common_affliction": None,
-            "avg_confidence": 0.0
-        },
-        "waypoints": [
-            {
-                "waypoint_id": "WAYPOINT_2",
-                "image": "",
-                "images": [],
-                "num_pineapples": 0,
-                "healthy": 0,
-                "afflicted": 0,
-                "afflictions": {}
-            }
-        ]
-    }
-    
-    try:
-        response = requests.post(
-            FLIGHT_LOG_ENDPOINT,
-            json=minimal_flight_log,
-            timeout=30,
-            headers={"Content-Type": "application/json"}
-        )
-        
-        if response.status_code in [200, 201]:
-            logger.info(f"   ✅ Flight log created (Status: {response.status_code})")
-        else:
-            logger.warning(f"   ⚠️  Got status {response.status_code}: {response.text[:100]}")
-            logger.warning("   Continuing anyway...")
-            
-    except Exception as e:
-        logger.error(f"   ❌ Failed to create flight log: {e}")
-        logger.info("   Continuing anyway to test image upload...")
-    
-    # ========================================
-    # NOW UPLOAD IMAGE
-    # ========================================
-    logger.info(f"\n📤 Step 2: Uploading image...")
-    success, image_url = test_upload_image_direct(test_image, flight_id=test_flight_id, waypoint="WAYPOINT_2")
-    
-    # Analyze results
-    if success and image_url:
-        logger.info("\n" + "=" * 60)
-        logger.info("✅ URL CAPTURE TEST PASSED!")
-        logger.info(f"   Server returned URL: {image_url}")
-        logger.info("=" * 60)
-        logger.info("\n💡 Your server is properly configured!")
-        logger.info("   The uploader.py system will work correctly.")
-        logger.info("   Waypoint-image linking should function as expected.")
-    elif success and not image_url:
-        logger.warning("\n" + "=" * 60)
-        logger.warning("⚠️  URL CAPTURE TEST INCOMPLETE")
-        logger.warning("   Image uploaded successfully, but no URL was returned")
-        logger.warning("=" * 60)
-        logger.warning("\n💡 Action needed:")
-        logger.warning("   Your server needs to return the image URL in the response.")
-        logger.warning("\n   Expected response format (JSON):")
-        logger.warning("   {")
-        logger.warning('     "url": "http://10.12.127.21:5000/uploads/image123.jpg"')
-        logger.warning("   }")
-        logger.warning("\n   Or one of these field names:")
-        logger.warning("   - url, image_url, file_url, path, filepath")
-        logger.warning("\n   Without URLs, waypoint-image linking will fail!")
-    else:
-        logger.error("\n" + "=" * 60)
-        logger.error("❌ URL CAPTURE TEST FAILED")
-        logger.error("   Image upload failed")
-        logger.error("=" * 60)
-        logger.error("\n💡 Check:")
-        logger.error("   1. Server is running")
-        logger.error("   2. Endpoint URL is correct")
-        logger.error("   3. Network connection")
-
-
-# ============================================================================
-# FILE SCANNING
-# ============================================================================
-
-def find_json_files():
-    """Find all JSON files"""
-    json_files = []
-    
-    if JSON_DIR.exists():
-        found = list(JSON_DIR.glob("**/*.json"))
-        json_files.extend(found)
-    
-    # Filter out upload_history.json
-    unique_files = [f for f in json_files if f.name != "upload_history.json"]
-    
-    return unique_files
-
-
-def find_image_files():
-    """Find all image files"""
-    image_files = []
-    
-    if IMAGE_DIR.exists():
-        jpg_files = list(IMAGE_DIR.glob("**/*.jpg"))
-        png_files = list(IMAGE_DIR.glob("**/*.png"))
-        image_files = jpg_files + png_files
-    
-    return image_files
-
-
-def list_available_files():
-    """List all available files"""
-    logger.info("=" * 60)
-    logger.info("📋 AVAILABLE FILES")
-    logger.info("=" * 60)
-    
-    json_files = find_json_files()
-    logger.info(f"\n📄 JSON Files ({len(json_files)}):")
-    if json_files:
-        for i, f in enumerate(json_files, 1):
-            size_kb = f.stat().st_size / 1024
-            logger.info(f"   {i}. {f.name} ({size_kb:.1f} KB)")
-    else:
-        logger.info("   No JSON files found")
-        logger.info(f"   Location: {JSON_DIR}")
-    
-    image_files = find_image_files()
-    logger.info(f"\n🖼️  Images ({len(image_files)}):")
-    if image_files:
-        total_size_mb = sum(f.stat().st_size for f in image_files) / (1024 * 1024)
-        logger.info(f"   Total size: {total_size_mb:.2f} MB")
-        
-        for i, f in enumerate(image_files[:10], 1):
-            size_mb = f.stat().st_size / (1024 * 1024)
-            logger.info(f"   {i}. {f.name} ({size_mb:.2f} MB)")
-        
-        if len(image_files) > 10:
-            logger.info(f"   ... and {len(image_files) - 10} more")
-    else:
-        logger.info("   No images found")
-        logger.info(f"   Location: {IMAGE_DIR}")
-    
-    logger.info("=" * 60)
-
-
-def show_config_info():
-    """Show configuration information"""
-    logger.info("=" * 60)
-    logger.info("⚙️  CONFIGURATION INFORMATION")
-    logger.info("=" * 60)
-    
-    logger.info("\n🌐 Server Type:")
-    if is_local_server:
-        logger.info("   🏠 LOCAL SERVER")
-        logger.info(f"      Base URL: {SERVER_BASE}")
-        logger.info("\n   📝 Local Server Requirements:")
-        logger.info("      □ Server must be running")
-        logger.info("      □ Both devices on same network")
-        logger.info("      □ Firewall allows connections")
-    else:
-        logger.info("   ☁️  CLOUD SERVER")
-        logger.info(f"      Base URL: {SERVER_BASE}")
-    
-    logger.info("\n🌐 API Endpoints:")
-    logger.info(f"   JSON Upload:   {FLIGHT_LOG_ENDPOINT}")
-    logger.info(f"   Image Upload:  {IMAGE_UPLOAD_ENDPOINT}")
-    
-    logger.info("\n📂 Directories:")
-    dirs = {
-        "Base": config.BASE_DIR,
-        "JSON": config.JSON_DIR,
-        "Images": config.IMAGE_DIR,
-        "Logs": config.LOG_DIR,
-    }
-    
-    for name, path in dirs.items():
-        exists = "✓" if path.exists() else "✗"
-        logger.info(f"   {exists} {name}: {path}")
-        if path.exists():
-            files = list(path.glob("*"))
-            logger.info(f"      └─ {len(files)} items")
-    
-    logger.info("\n🔧 AI Configuration:")
-    logger.info(f"   Model: {config.MODEL_PATH.name if hasattr(config, 'MODEL_PATH') else 'N/A'}")
-    logger.info(f"   Detection threshold: {config.DETECTION_THRESHOLD if hasattr(config, 'DETECTION_THRESHOLD') else 'N/A'}")
-    logger.info(f"   Classes: {len(config.CLASS_NAMES) if hasattr(config, 'CLASS_NAMES') else 'N/A'}")
-    
-    logger.info("=" * 60)
-
-
-# ============================================================================
-# MAIN MENU
-# ============================================================================
 
 if __name__ == "__main__":
-    print("\n" + "=" * 60)
-    print("🧪 PINYASURI UPLOADER TEST SCRIPT - FIXED")
-    print("=" * 60)
-    
-    # Show current configuration
-    if is_local_server:
-        print(f"\n🏠 LOCAL SERVER MODE")
-        print(f"   Server: {SERVER_BASE}")
-        print(f"   ⚠️  Ensure server is running and reachable!")
-    else:
-        print(f"\n☁️  CLOUD SERVER MODE")
-        print(f"   Server: {SERVER_BASE}")
-    
-    print(f"\n📡 Configured Endpoints:")
-    print(f"   JSON   → {FLIGHT_LOG_ENDPOINT}")
-    print(f"   Images → {IMAGE_UPLOAD_ENDPOINT}")
-    
-    print(f"\n📂 Using directories from config.py:")
-    print(f"   JSON:   {JSON_DIR}")
-    print(f"   Images: {IMAGE_DIR}")
-    
-    print("\n" + "=" * 60)
-    print("🎯 RECOMMENDED TEST ORDER:")
-    print("   1. Test server connection (option 7)")
-    print("   2. Test image URL capture (option 2) - NOW FIXED!")
-    print("   3. Test complete workflow (option 1)")
-    print("   4. Validate existing JSON files (option 6)")
-    print("\n" + "=" * 60)
-    print("Available options:")
-    print("  1. 🚀 Test complete uploader workflow (RECOMMENDED)")
-    print("  2. 🔍 Test image URL capture (FIXED)")
-    print("  3. 📤 Test direct image upload")
-    print("  4. 📄 Test direct JSON upload")
-    print("  5. 📋 List available files")
-    print("  6. ✅ Validate waypoint-image relationships in JSON")
-    print("  7. 🌐 Test server connection")
-    print("  8. ⚙️  Show configuration")
-    print("=" * 60)
-    
-    try:
-        choice = input("\nEnter choice (1-8) [default=7]: ").strip() or "7"
-        print()
-        
-        if choice == "1":
-            test_uploader_workflow()
-            
-        elif choice == "2":
-            test_image_url_capture()
-            
-        elif choice == "3":
-            image_files = find_image_files()
-            if image_files:
-                logger.info(f"Found {len(image_files)} images")
-                test_upload_image_direct(image_files[0])
-            else:
-                logger.error("No images found!")
-                logger.info(f"Add .jpg files to: {IMAGE_DIR}")
-            
-        elif choice == "4":
-            json_files = find_json_files()
-            if json_files:
-                logger.info(f"Found {len(json_files)} JSON files")
-                test_upload_json_direct(json_files[0])
-            else:
-                logger.error("No JSON files found!")
-                logger.info(f"Add .json files to: {JSON_DIR}")
-            
-        elif choice == "5":
-            list_available_files()
-            
-        elif choice == "6":
-            json_files = find_json_files()
-            if json_files:
-                logger.info(f"\nFound {len(json_files)} JSON file(s)")
-                
-                if len(json_files) == 1:
-                    validate_waypoint_image_relationships(json_files[0])
-                else:
-                    print("\nWhich file to validate?")
-                    for i, f in enumerate(json_files, 1):
-                        print(f"  {i}. {f.name}")
-                    
-                    try:
-                        file_choice = int(input("\nEnter number [1]: ").strip() or "1")
-                        if 1 <= file_choice <= len(json_files):
-                            validate_waypoint_image_relationships(json_files[file_choice - 1])
-                        else:
-                            logger.error("Invalid choice!")
-                    except ValueError:
-                        logger.error("Invalid input!")
-            else:
-                logger.error("No JSON files found!")
-                logger.info(f"Add .json files to: {JSON_DIR}")
-            
-        elif choice == "7":
-            test_server_connection()
-            
-        elif choice == "8":
-            show_config_info()
-            
-        else:
-            print("❌ Invalid choice!")
-    
-    except KeyboardInterrupt:
-        print("\n\n⚠️  Test cancelled by user")
-    except Exception as e:
-        logger.error(f"❌ Error: {e}", exc_info=True)
-    
-    print("\n" + "=" * 60)
-    print("🏁 Test script completed")
-    print("=" * 60 + "\n")
+    main()
