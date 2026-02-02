@@ -761,7 +761,7 @@ def main():
     uploader.start_upload_queue()
     
     # SCAN FOR UNUPLOADED FILES FROM PREVIOUS RUNS
-    uploader.scan_and_queue_unuploaded_files()
+    # uploader.scan_and_queue_unuploaded_files()
     
     pixhawk = Pixhawk()
     camera = Camera()
