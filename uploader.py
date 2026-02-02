@@ -508,13 +508,43 @@ def finalize_flight_summary(flight_id, total_waypoints):
         summary_path = flight_aggregator.save_flight_summary(flight_id, total_waypoints)
         return summary_path
     
+    # STEP 1: Generate flight summary (with placeholder image URLs)
+    logger.info("=" * 60)
+    logger.info("STEP 1: Generate Flight Summary")
+    logger.info("=" * 60)
+    
+    summary_path = flight_aggregator.save_flight_summary(flight_id, total_waypoints)
+    
+    if not summary_path:
+        logger.error("❌ Failed to generate flight summary")
+        return None
+    
+    # STEP 2: Upload flight summary JSON FIRST (creates flight record on server)
+    logger.info("=" * 60)
+    logger.info("STEP 2: Upload Flight Summary JSON")
+    logger.info("=" * 60)
+    
+    if upload_history.is_uploaded(summary_path):
+        logger.info(f"⏭️  Already uploaded: {summary_path.name}")
+    else:
+        if upload_json_directly(summary_path):
+            logger.info("✅ Flight summary uploaded successfully!")
+        else:
+            logger.error("❌ Failed to upload flight summary")
+            logger.info("   Cannot upload images without flight record")
+            return summary_path
+    
+    # Wait for server to process
+    logger.info("\n⏳ Waiting 2 seconds for server to process...")
+    time.sleep(2)
+    
     # Get all flight images
     flight_images = flight_aggregator.get_flight_images(flight_id)
     logger.info(f"📸 Found {len(flight_images)} images from flight")
     
-    # STEP 1: Upload all images first
+    # STEP 3: Upload all images (NOW flight exists on server)
     logger.info("=" * 60)
-    logger.info("STEP 1: Upload Images")
+    logger.info("STEP 3: Upload Images")
     logger.info("=" * 60)
     
     uploaded_count = 0
@@ -582,37 +612,38 @@ def finalize_flight_summary(flight_id, total_waypoints):
     logger.info(f"   • Skipped (already uploaded): {skipped_count}")
     logger.info(f"   • Failed: {failed_count}")
     logger.info(f"   • Total: {len(flight_images)}")
-    
-    # STEP 2: Generate flight summary with image URLs
-    logger.info("=" * 60)
-    logger.info("STEP 2: Generate Flight Summary")
-    logger.info("=" * 60)
-    
-    summary_path = flight_aggregator.save_flight_summary(flight_id, total_waypoints)
-    
-    if not summary_path:
-        logger.error("❌ Failed to generate flight summary")
-        return None
-    
-    # STEP 3: Upload flight summary JSON
-    logger.info("=" * 60)
-    logger.info("STEP 3: Upload Flight Summary JSON")
-    logger.info("=" * 60)
-    
-    if upload_history.is_uploaded(summary_path):
-        logger.info(f"⏭️  Already uploaded: {summary_path.name}")
-    else:
-        if upload_json_directly(summary_path):
-            logger.info("✅ Flight summary uploaded successfully!")
+
+    # STEP 4: Re-generate and re-upload JSON with actual image URLs
+    if uploaded_count > 0:
+        logger.info("=" * 60)
+        logger.info("STEP 4: Update Flight Summary with Image URLs")
+        logger.info("=" * 60)
+        
+        # Re-generate summary with image URLs that were collected during upload
+        updated_summary_path = flight_aggregator.save_flight_summary(flight_id, total_waypoints)
+        
+        if updated_summary_path:
+            logger.info("📤 Re-uploading updated flight summary with image URLs...")
+            
+            # Force re-upload even if marked as uploaded
+            # Remove from history first to allow re-upload
+            if str(updated_summary_path) in upload_history.uploaded_files:
+                upload_history.uploaded_files.remove(str(updated_summary_path))
+            
+            if upload_json_directly(updated_summary_path):
+                logger.info("✅ Flight summary updated with image URLs!")
+            else:
+                logger.warning("⚠️  Failed to update flight summary with image URLs")
         else:
-            logger.error("❌ Failed to upload flight summary")
-            logger.info("   Local summary saved, will retry upload later")
+            logger.error("❌ Failed to re-generate flight summary")
+    else:
+        logger.warning("⚠️  No images uploaded, skipping summary update")
     
     logger.info("=" * 60)
     logger.info("✓ FLIGHT FINALIZATION COMPLETE")
     logger.info("   Ready for next flight")
     logger.info("=" * 60)
-    
+
     return summary_path
 
 
