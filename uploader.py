@@ -521,6 +521,9 @@ def finalize_flight_summary(flight_id, total_waypoints):
     skipped_count = 0
     failed_count = 0
     
+    # Get flight data to access waypoint mappings
+    flight = flight_aggregator.flights[flight_id]
+
     for image_path in flight_images:
         image_file = Path(image_path)
         
@@ -535,13 +538,29 @@ def finalize_flight_summary(flight_id, total_waypoints):
             skipped_count += 1
             continue
         
-        # Extract waypoint from filename
-        waypoint_match = re.search(r'_wp(\d+)_', image_file.name)
-        if waypoint_match:
-            waypoint_num = int(waypoint_match.group(1))
-            waypoint = config.get_waypoint_name(waypoint_num)
-        else:
-            waypoint = "UNKNOWN"
+        # Find which waypoint this image belongs to (from tracked data)
+        waypoint = None
+        waypoint_num = None
+        image_path_str = str(image_path)
+        
+        for wp_num, wp_data in flight['waypoints'].items():
+            if image_path_str in wp_data['images']:
+                waypoint_num = wp_num
+                waypoint = config.get_waypoint_name(wp_num)
+                logger.debug(f"   Found in tracked data: WP{wp_num}")
+                break
+        
+        # Fallback to filename parsing if not found in tracked data
+        if not waypoint:
+            logger.warning(f"⚠️  Not in tracked data, parsing filename: {image_file.name}")
+            waypoint_match = re.search(r'_wp(\d+)_', image_file.name)
+            if waypoint_match:
+                waypoint_num = int(waypoint_match.group(1))
+                waypoint = config.get_waypoint_name(waypoint_num)
+            else:
+                waypoint = "UNKNOWN"
+        
+        logger.info(f"📤 Uploading to waypoint: {waypoint}")
         
         # Upload image
         result = upload_image_directly(image_file, flight_id, waypoint)

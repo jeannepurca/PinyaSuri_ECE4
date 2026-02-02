@@ -401,13 +401,18 @@ def handle_waypoint_capture(pixhawk, camera, classifier, metrics, waypoint, flig
             )
             
             # DELETE NON-SELECTED FRAMES to save space
+            logger.info(f"  Cleaning up non-best frames...")
             for result in burst_results:
                 if result['frame_index'] != best_result['frame_index']:
                     try:
-                        Path(result['image_path']).unlink()
-                        logger.debug(f"  ✓ Deleted non-selected frame {result['frame_index']}")
+                        frame_path = Path(result['image_path'])
+                        logger.info(f"    Deleting: {frame_path.name}")
+                        frame_path.unlink()
+                        logger.info(f"    ✓ Deleted frame {result['frame_index']}")
+                    except FileNotFoundError:
+                        logger.warning(f"    ⚠️ Frame already deleted: {frame_path.name}")
                     except Exception as e:
-                        logger.debug(f"  ⚠️ Could not delete frame: {e}")
+                        logger.error(f"    ❌ Could not delete {frame_path.name}: {e}")
             
             captured_wp.add(waypoint)
             logger.info(f"✓ WAYPOINT {waypoint} CAPTURE COMPLETE")
