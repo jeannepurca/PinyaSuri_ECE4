@@ -1,19 +1,22 @@
 # 🍍 PinyaSuri — An AI-Driven Autonomous Drone System for Pineapple Affliction Detection, Classification, and Monitoring
 
+---
+
+## 👥 Research Team
 **Polytechnic University of the Philippines – Sto. Tomas Campus**  
 *Bachelor of Science in Electronics Engineering* | *Academic Year 2025–2026*
 
-***Capstone Project (ECE 4)***
-| Researcher | Email |
-|---|---|
-| Andrea Marione D. De Guzman | andreamarioned1@gmail.com |
-| Daniella Kim C. Hernandez | dnllkmhrnndz@gmail.com |
-| Ashley Louise O. Libarnes | ashleylibarnes12@gmail.com |
-| James Bernard A. Licayan | jblicayan28@gmail.com |
-| Jeanne Mae M. Purca | jeannemaemanicpurca@gmail.com |
-| April T. Roxas | aprilroxas.univ@gmail.com |
+***Capstone Project by ECE 4***
+| Researcher | Role | Email |
+|---|---|---|
+| Andrea Marione D. De Guzman | Drone System Hardware & Integration | andreamarioned1@gmail.com |
+| Daniella Kim C. Hernandez | Machine Learning & Model Training | dnllkmhrnndz@gmail.com |
+| Ashley Louise O. Libarnes | Drone System Hardware & Integration | ashleylibarnes12@gmail.com |
+| James Bernard A. Licayan | Drone System Hardware & Integration | jblicayan28@gmail.com |
+| Jeanne Mae M. Purca | Onboard Computing & Control System | jeannemaemanicpurca@gmail.com |
+| April T. Roxas | Web Development & Data Visualization | aprilroxas.univ@gmail.com |
 
-**Academic Advisers:** Dr. Robert G. de Luna, PECE · Engr. Isagani G. Garcia
+**Academic Advisers:** Dr. Robert G. de Luna, PECE and Engr. Isagani G. Garcia
 
 ---
 
