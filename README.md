@@ -1,44 +1,99 @@
-# 🍍 PinyaSuri — AI-Driven Autonomous Drone System for Pineapple Health Monitoring
+# 🍍 PinyaSuri — AI-Driven Autonomous Drone System for Pineapple Affliction Detection, Classification, and Monitoring
 
-> An Electronics Engineering Capstone Project (ECE4) — autonomous drone system that detects and classifies pineapple plant diseases using computer vision and edge AI.
+> **ECE Capstone Project** · Polytechnic University of the Philippines – Sto. Tomas Campus  
+> Bachelor of Science in Electronics Engineering · Academic Year 2025–2026
 
 ---
 
 ## 📖 Overview
 
-**PinyaSuri** is a precision agriculture system that integrates autonomous drone flight, real-time image capture, and on-device AI inference to monitor pineapple crop health. The drone autonomously navigates a pre-programmed grid over a field, captures burst images at each waypoint, and classifies pineapple conditions using a YOLOv8n TFLite model running on a Raspberry Pi 5.
+**PinyaSuri** is an AI-based autonomous drone system developed to address the limitations of traditional manual inspection in pineapple plantation monitoring. The system integrates drone technology, image processing, deep learning, and a **grid-based localization framework** to enable efficient, scalable, and non-invasive detection and classification of pineapple afflictions.
 
-### What the system does:
-1. Flies a pre-planned grid mission defined in Mission Planner
-2. Detects arrival at each waypoint via distance and hover-detection algorithms
-3. Captures 5-frame burst images per waypoint for redundancy
-4. Runs real-time AI inference on each image using a YOLOv8n TFLite model
-5. Logs all telemetry, images, and classification results to CSV files with GPS coordinates
+Aerial images are captured by a drone-mounted Raspberry Pi Camera Module V3 during autonomous grid-based flight and processed in real-time using a **YOLOv8n Model** deployed on a Raspberry Pi 5. Detection results — along with GPS coordinates and timestamps — are logged and displayed through a Flask-based web interface, enabling spatially-aware crop health monitoring.
 
 ---
 
-## 🔍 Detectable Pineapple Conditions
+## 🎯 Objectives
+
+1. Develop a drone-based image acquisition system for pineapple field monitoring
+2. Design and train a YOLO-based deep learning model for affliction detection and classification
+3. Implement a grid-based localization framework to map affliction occurrences spatially
+4. Provide farmers and decision-makers with actionable, data-driven crop management support
+
+---
+
+## 🔍 Detectable Pineapple Conditions (7 Classes)
 
 | Class | Description |
 |---|---|
 | ✅ Healthy | No detected abnormalities |
-| 🦠 Mealybug Wilt Disease | Pest-caused wilting |
-| 🌱 Root Rot Disease | Soil-borne fungal infection |
-| 👑 Crown Rot Disease | Crown tissue decay |
-| 🍍 Fruit Fasciation Disorder | Abnormal fruit flattening |
-| 👑👑 Multiple Crown Disorder | Multiple crown growth anomaly |
+| 👑 Crown Rot Disease | Fungal decay of the crown tissue |
+| 🌱 Root Rot Disease | Soil-borne infection affecting roots |
+| 🍍 Fruit Rot Disease | Post-harvest or field fruit decay |
+| 🦠 Mealybug Wilt Disease | Pest-caused wilting and leaf discoloration |
+| 👑👑 Multiple Crown Disorder | Abnormal multiple crown growth |
+| 🔀 Fruit Fasciation Disorder | Abnormal flattening or fasciation of the fruit |
 
 ---
 
-## 🔧 Hardware Requirements
+## 🤖 AI Model Performance
+
+Four YOLO architectures were trained and evaluated on a dataset of **2,100 annotated images** (70% train / 20% validation / 10% test). **YOLOv8n** was selected as the optimal model for deployment.
+
+### Model Comparison
+
+| Model | Training Accuracy (%) | Testing Accuracy (%) | Precision (%) | Recall (%) | F1-Score (%) | mAP@0.5 (%) |
+|---|---|---|---|---|---|---|
+| **YOLOv8n** ✅ | **87.06** | **89.36** | **89.28** | **80.18** | **84.75** | **89.36** |
+| YOLOv8s | 77.19 | 81.62 | 88.72 | 66.70 | 78.13 | 81.62 |
+| YOLOv11 | 85.84 | 88.02 | 88.52 | 80.20 | 84.77 | 88.02 |
+| YOLOv11s | 67.40 | 66.03 | 81.29 | 66.73 | 66.31 | 66.03 |
+
+YOLOv8n achieved the highest testing accuracy with strong generalization and minimal overfitting, making it the best-suited model for edge deployment on the Raspberry Pi 5.
+
+### Field Validation (PinyaSuri AI System)
+
+The system was validated against expert farmer visual inspection on **35 pineapple samples** (30 same, 5 different):
+
+| Metric | Macro Average | Micro Average |
+|---|---|---|
+| Accuracy | 0.962 | 0.962 |
+| Precision | 0.840 | 0.897 |
+| Recall | 0.900 | 0.963 |
+| F1-Score | 0.861 | 0.929 |
+
+**Cohen's Kappa: 83.5 → Almost Perfect Agreement** with farmer-validated ground truth labels.
+
+### Per-Class Recall Highlights (YOLOv8n)
+
+| Class | Recall |
+|---|---|
+| Fruit Rot Disease | 100% |
+| Healthy | 98% |
+| Root Rot Disease | 93% |
+| Fruit Fasciation Disorder | 91% |
+| Multiple Crown Disorder | 88% |
+| Mealybug Wilt Disease | 87% |
+| Crown Rot Disease | 83% |
+
+---
+
+## 🔧 Hardware Components
 
 | Component | Model | Role |
 |---|---|---|
-| Flight Controller | Pixhawk 2.4.8 | Autonomous navigation & stabilization |
-| Onboard Computer | Raspberry Pi 5 | AI inference & image processing |
-| Camera | Raspberry Pi Camera Module V3 (12MP) | High-resolution image capture |
-| Connection | Serial UART (`/dev/ttyAMA0`) | MAVLink communication |
+| Flight Controller | Pixhawk 2.4.8 | Autonomous navigation, GPS-based waypoint tracking, attitude control |
+| Onboard Computer | Raspberry Pi 5 | AI inference, image processing, data logging |
+| Camera | Raspberry Pi Camera Module V3 (12MP) | Aerial image capture |
+| Frame | S500 Quadcopter Frame | Drone structure |
+| Motors | Brushless Motors (2212 920KV) | Propulsion via ESCs |
+| ESC | 30A Electronic Speed Controllers | Motor speed and direction control |
+| Propellers | 1045 Propellers | Lift generation |
+| RC Control | FlySky FS-i6X Transmitter & Receiver | Manual override |
+| Connection | Serial UART (`/dev/ttyAMA0`) | MAVLink communication between Pixhawk and RPi |
 | Power | LiPo Battery (3S–4S) | Monitored via Pixhawk telemetry |
+
+> The camera is mounted **downward-facing beneath the frame**, capturing images at **1.5m altitude and 45° angle** for optimal field coverage.
 
 ---
 
@@ -46,7 +101,10 @@
 
 - **OS**: Raspberry Pi OS Bookworm (64-bit)
 - **Python**: 3.9+
-- **Ground Station**: Mission Planner (for mission planning and upload)
+- **Ground Station**: Mission Planner (for mission planning and waypoint upload)
+- **Web Framework**: Flask (for the GUI/web interface)
+- **Deployment**: Render.com (web application hosting)
+- **Annotation Tool**: Roboflow (used for dataset labeling)
 
 ### Python Dependencies
 
@@ -60,7 +118,7 @@ numpy>=1.21.0
 aiofiles
 ```
 
-Install all dependencies with:
+Install all dependencies:
 ```bash
 pip install -r requirements.txt
 ```
@@ -71,8 +129,8 @@ pip install -r requirements.txt
 
 ```
 PinyaSuri_ECE4/
-├── main_ai.py              # Main entry point with AI detection
-├── main.py                 # Entry point without AI (capture only)
+├── main_ai.py              # Main entry point — with AI detection
+├── main.py                 # Entry point — image capture only (no AI)
 ├── classifier.py           # YOLOv8n TFLite inference engine
 ├── camera.py               # Raspberry Pi camera control
 ├── pixhawk.py              # Pixhawk / MAVLink interface
@@ -82,21 +140,21 @@ PinyaSuri_ECE4/
 ├── requirements.txt        # Python dependencies
 │
 ├── models/
-│   └── YOLOv8n_PinyaSuri_AI.tflite
+│   └── YOLOv8n_PinyaSuri_AI.tflite   # Deployed AI model
 │
 ├── logs/
-│   ├── raw_flight_data.csv
-│   ├── image_captures.csv
-│   ├── ai_classifications.csv
-│   └── flight_YYYY-MM-DD.log
+│   ├── raw_flight_data.csv            # Telemetry logs (20 Hz)
+│   ├── image_captures.csv             # Per-image metadata
+│   ├── ai_classifications.csv         # AI detection results
+│   └── flight_YYYY-MM-DD.log          # Daily text logs
 │
 ├── images/
 │   └── YYYYMMDD/
-│       └── pinyasuri_*.jpg
+│       └── pinyasuri_*.jpg            # Timestamped captured images
 │
-├── metrics_compu/          # Metrics computation notebooks
-├── other_codes/            # Supplementary scripts
-└── pinyasuri_env/          # Virtual environment
+├── metrics_compu/          # Performance metrics computation notebooks
+├── other_codes/            # Supplementary/experimental scripts
+└── pinyasuri_env/          # Python virtual environment
 ```
 
 ---
@@ -133,23 +191,29 @@ Enable UART in the Pi's boot config:
 sudo nano /boot/firmware/config.txt
 ```
 
-Add the following lines:
+Add:
 ```
 enable_uart=1
 dtoverlay=disable-bt
 ```
 
-Disable the serial console via `raspi-config`:
+Disable serial console via `raspi-config`:
 ```
 Interface Options → Serial Port
   Login shell over serial: NO
   Serial port hardware enabled: YES
 ```
 
-Then reboot and add your user to the `dialout` group:
+Add your user to the `dialout` group:
 ```bash
 sudo usermod -a -G dialout $USER
 sudo reboot
+```
+
+Verify:
+```bash
+ls -l /dev/ttyAMA0
+# Expected: crw-rw---- 1 root dialout
 ```
 
 ### 5. Deploy the AI Model
@@ -170,11 +234,11 @@ MODEL_PATH = MODEL_DIR / "YOLOv8n_PinyaSuri_AI.tflite"
 
 ### Step 1: Plan Mission in Mission Planner
 1. Connect to Pixhawk via USB
-2. Define a grid mission with `TAKEOFF → waypoints → RTL`
-3. Set altitude to 3–4 meters
-4. Upload mission to Pixhawk
+2. Plan a grid mission: `TAKEOFF → grid waypoints → RTL`
+3. Set flight altitude to **1.5 meters**, camera angle at **45°**
+4. Upload mission to Pixhawk and verify waypoint count
 
-### Step 2: Run the System
+### Step 2: Run the System on Raspberry Pi
 
 ```bash
 source pinyasuri_env/bin/activate
@@ -182,40 +246,25 @@ source pinyasuri_env/bin/activate
 # With AI detection (recommended)
 python3 main_ai.py
 
-# Without AI (image capture only)
+# Without AI — image capture only
 python3 main.py
 ```
 
 ### Step 3: Fly
 1. Wait for `✓ Pixhawk connected successfully!`
 2. Arm the drone in Mission Planner
-3. Switch to AUTO mode to begin the mission
-4. Monitor output for waypoint arrivals and capture events
+3. Switch to AUTO mode to begin the grid mission
+4. The system will autonomously navigate, capture, run inference, and log results per waypoint
 
 ### Stopping
-- **Graceful**: `Ctrl+C` — the system will finalize logs before shutting down
-- **Emergency**: Disarm via Mission Planner
+- **Graceful**: `Ctrl+C` — logs are finalized automatically
+- **Emergency**: Disarm via Mission Planner or RC transmitter override
 
 ---
 
-## ⚙️ Configuration (`config.py`)
+## 🧠 10-Point Waypoint Capture Validation
 
-| Parameter | Default | Description |
-|---|---|---|
-| `MIN_ALTITUDE_FOR_CAPTURE` | `0.5 m` | Minimum altitude to trigger capture |
-| `MAX_ALTITUDE_FOR_CAPTURE` | `5 m` | Maximum altitude to trigger capture |
-| `WAYPOINT_CAPTURE_DISTANCE` | `1.5 m` | Distance threshold from waypoint |
-| `HOVER_SPEED_THRESHOLD` | `0.5 m/s` | Speed below which hover is assumed |
-| `STABILIZATION_DELAY` | `2 s` | Wait time before burst capture |
-| `BURST_CAPTURE_COUNT` | `5` | Frames captured per waypoint |
-| `BURST_INTERVAL` | `0.5 s` | Interval between burst frames |
-| `DETECTION_THRESHOLD` | `0.5` | Minimum AI confidence to log |
-
----
-
-## 🧠 How the 10-Point Capture Validation Works
-
-Before capturing at any waypoint, the system checks all 10 of the following conditions:
+Before capturing at any waypoint, the system verifies all of the following:
 
 1. ✅ Drone is armed
 2. ✅ Flight mode is AUTO
@@ -230,15 +279,30 @@ Before capturing at any waypoint, the system checks all 10 of the following cond
 
 ---
 
+## ⚙️ Configuration (`config.py`)
+
+| Parameter | Default | Description |
+|---|---|---|
+| `MIN_ALTITUDE_FOR_CAPTURE` | `0.5 m` | Minimum altitude to allow capture |
+| `MAX_ALTITUDE_FOR_CAPTURE` | `5 m` | Maximum altitude to allow capture |
+| `WAYPOINT_CAPTURE_DISTANCE` | `1.5 m` | Acceptable distance from waypoint |
+| `HOVER_SPEED_THRESHOLD` | `0.5 m/s` | Speed below which hover is assumed |
+| `STABILIZATION_DELAY` | `2 s` | Wait time before burst begins |
+| `BURST_CAPTURE_COUNT` | `5` | Frames per waypoint |
+| `BURST_INTERVAL` | `0.5 s` | Interval between burst frames |
+| `DETECTION_THRESHOLD` | `0.5` | Minimum AI confidence to log |
+
+---
+
 ## 📊 Output Files
 
-### `logs/raw_flight_data.csv` — Flight Telemetry (20 Hz)
-Columns: `flight_id`, `timestamp_utc`, `roll_deg`, `pitch_deg`, `yaw_deg`, `accel_x/y/z`, `lat_deg`, `lon_deg`, `alt_m`, `groundspeed_m_s`, `waypoint_index`, `flight_mode`, `nav_state`, `is_hovering`
+### `logs/raw_flight_data.csv` — Telemetry (20 Hz)
+Columns: `flight_id`, `timestamp_utc`, `roll_deg`, `pitch_deg`, `yaw_deg`, `accel_x/y/z_m_s2`, `lat_deg`, `lon_deg`, `alt_m`, `groundspeed_m_s`, `waypoint_index`, `flight_mode`, `nav_state`, `is_hovering`
 
-### `logs/image_captures.csv` — Capture Metadata
+### `logs/image_captures.csv` — Image Metadata
 Columns: `timestamp`, `flight_id`, `waypoint`, `lat_deg`, `lon_deg`, `rel_alt_m`, `burst_id`, `burst_index`, `image_path`
 
-### `logs/ai_classifications.csv` — AI Detection Results
+### `logs/ai_classifications.csv` — AI Results
 Columns: `timestamp`, `flight_id`, `waypoint`, `burst_id`, `burst_index`, `image_path`, `detection_count`, `detections`
 
 Detection JSON format:
@@ -257,18 +321,35 @@ Naming: `pinyasuri_flight{N}_wp{W}_burst{B}_{TIMESTAMP}.jpg`
 
 ---
 
-## 📈 Performance (Tested on Raspberry Pi 5)
+## 🌐 Web Interface (GUI)
+
+The PinyaSuri web interface is built with **Flask** and hosted on **Render.com**. It includes:
+
+| Section | Description |
+|---|---|
+| 🏠 Landing Page | Welcome page and system introduction |
+| 📊 Main Dashboard | Overview of AI detection results and crop health summary |
+| 📋 Data Logs | Per-flight detection records with timestamps and GPS |
+| 📷 Upload Section | Upload images for on-demand AI analysis |
+| 💊 Management Strategies | Recommended interventions per detected affliction |
+
+---
+
+## 📈 System Performance Summary
 
 | Metric | Value |
 |---|---|
-| Waypoint GPS accuracy | ±0.5 m |
-| Capture success rate | ~98% (in AUTO mode) |
-| AI inference time | 200–300 ms per image |
-| Burst capture duration | ~3 seconds (5 frames) |
+| Dataset size | 2,100 images across 7 classes |
+| Train / Val / Test split | 70% / 20% / 10% |
+| Image resolution (training) | 640×640 px |
+| Best model | YOLOv8n (89.36% mAP@0.5) |
+| Field accuracy | 96.2% |
+| Cohen's Kappa (vs. farmer) | 83.5 — Almost Perfect Agreement |
+| Field agreement rate | 30 / 35 samples |
+| Flight altitude | 1.5 m |
+| Camera angle | 45° |
 | Telemetry logging rate | 20 Hz |
-| CPU usage during capture + inference | 40–60% |
-| RAM usage | ~500 MB |
-| Image size | ~2 MB (12MP JPEG) |
+| AI inference time (RPi 5) | ~200–300 ms per image |
 
 ---
 
@@ -276,21 +357,21 @@ Naming: `pinyasuri_flight{N}_wp{W}_burst{B}_{TIMESTAMP}.jpg`
 
 **Pixhawk not connecting (`⚠ Waiting for heartbeat...`)**
 ```bash
-ls -l /dev/ttyAMA0               # Check device exists
-grep enable_uart /boot/firmware/config.txt  # Verify UART enabled
-groups | grep dialout             # Confirm dialout group membership
+ls -l /dev/ttyAMA0                          # Check device exists
+grep enable_uart /boot/firmware/config.txt  # Verify UART is enabled
+groups | grep dialout                       # Confirm dialout group membership
 ```
 
 **Camera not initializing**
 ```bash
-libcamera-hello --list-cameras   # Check camera is detected
-libcamera-still -o test.jpg      # Test manual capture
+libcamera-hello --list-cameras   # Verify camera is detected
+libcamera-still -o test.jpg      # Test a manual capture
 ```
 
 **No images captured during flight**
-- Check if altitude is within `MIN/MAX_ALTITUDE_FOR_CAPTURE`
-- Verify drone is reaching within 1.5m of each waypoint
-- Confirm the drone is in AUTO mode (not GUIDED or STABILIZE)
+- Confirm altitude is between 0.5m and 5m
+- Ensure the drone reaches within 1.5m of each waypoint
+- Check that the flight mode is AUTO (not GUIDED or STABILIZE)
 
 **AI model not loading**
 ```bash
@@ -298,9 +379,9 @@ ls -l models/YOLOv8n_PinyaSuri_AI.tflite
 python3 -c "import tflite_runtime.interpreter as tflite; print('TFLite OK')"
 ```
 
-**CSV column mismatch**
+**CSV column mismatch from old logs**
 ```bash
-rm logs/*.csv   # Delete old CSVs and restart — headers will regenerate
+rm logs/*.csv   # Delete outdated CSVs — headers regenerate on next run
 ```
 
 ---
@@ -309,58 +390,69 @@ rm logs/*.csv   # Delete old CSVs and restart — headers will regenerate
 
 This system is intended for **research and educational use**.
 
-Before flying, ensure you:
-- ✅ Comply with local drone regulations (Philippines' CAAP, FAA, CAA, etc.)
+Before operating, ensure you:
+- ✅ Comply with Philippine CAAP drone regulations
 - ✅ Register your drone if required
-- ✅ Obtain permits for agricultural airspace use
-- ✅ Maintain line-of-sight with the drone at all times
+- ✅ Obtain proper permits for agricultural airspace use
+- ✅ Maintain visual line-of-sight at all times
 - ✅ Have an RC transmitter ready for manual override
 - ✅ Monitor battery levels throughout the mission
 
-The developers are not liable for accidents, property damage, or regulatory violations.
+The developers are not liable for accidents, property damage, or regulatory violations arising from use of this system.
 
 ---
 
 ## 🔮 Future Work
 
-- Real-time image streaming to a ground station
-- Web dashboard for live monitoring
-- PostgreSQL / cloud database integration
-- Automatic grid mission generation from field boundaries
-- Multi-spectral imaging (NDVI support)
-- Cloud upload of images and detection logs
-- Battery-based auto-RTL triggers
-- Obstacle avoidance integration
+- Expanding the dataset to improve robustness under varying lighting and field conditions
+- Integrating real-time decision support for automated field interventions
+- Real-time image streaming to a ground station or web dashboard
+- Multi-spectral imaging support (NDVI) for deeper crop health analysis
+- Cloud-based storage and upload of images and detection logs
+- Battery-based auto-RTL triggers for safe autonomous return
+- Obstacle avoidance module integration
 
 ---
 
 ## 🙏 Acknowledgments
 
-- [Pixhawk](https://pixhawk.org/) — Open-source flight controller platform
-- [MAVLink](https://mavlink.io/) — Lightweight UAV communication protocol
-- [Ultralytics YOLOv8](https://github.com/ultralytics/ultralytics) — Object detection framework
-- [Raspberry Pi Foundation](https://www.raspberrypi.org/) — Edge computing hardware
-- [OpenCV](https://opencv.org/) — Computer vision library
+The researchers gratefully acknowledge:
+- **Polytechnic University of the Philippines – Sto. Tomas Campus** for providing the research environment
+- **Dr. Robert G. de Luna, PECE** and **Engr. Isagani G. Garcia** — project advisers
+- **Alumni contributors**: Aeris John P. Alonzo, Patrica Nicole A. Austria, Kiar Howard P. Fule, Raniel Joseph G. Ison, Kurt Lheo M. Luna, and Josiah Miguel M. Paniza — for additional dataset contributions
+- **Mr. Rodrigo Arcillas** and the **Roxas family** — for field access, crops, and hospitality during data collection
+- Pineapple farmers across Batangas, Cavite, and Laguna for their cooperation
+
+Tools and frameworks: [Pixhawk](https://pixhawk.org/) · [MAVLink](https://mavlink.io/) · [Ultralytics YOLOv8](https://github.com/ultralytics/ultralytics) · [Raspberry Pi Foundation](https://www.raspberrypi.org/) · [OpenCV](https://opencv.org/) · [Roboflow](https://roboflow.com/) · [Flask](https://flask.palletsprojects.com/)
 
 ---
 
-## 👥 Team
+## 👥 Research Team
 
-**Electronics Engineering Capstone Project (ECE4)**
-Institution: *(your university)*
-Academic Year: 2025–2026
+**Polytechnic University of the Philippines – Sto. Tomas Campus**  
+BS Electronics Engineering | Capstone Project (ECE4) | 2025–2026
 
-| Role | Name |
+| Researcher | Email |
 |---|---|
-| System Architecture & Integration | *(name)* |
-| AI Model Development | *(name)* |
-| Hardware Integration | *(name)* |
-| Field Testing & Validation | *(name)* |
+| Andrea Marione D. De Guzman | andreamarioned1@gmail.com |
+| Daniella Kim C. Hernandez | dnllkmhrnndz@gmail.com |
+| Ashley Louise O. Libarnes | ashleylibarnes12@gmail.com |
+| James Bernard A. Licayan | jblicayan28@gmail.com |
+| Jeanne Mae M. Purca | jeannemaemanicpurca@gmail.com |
+| April T. Roxas | aprilroxas.univ@gmail.com |
 
-**Academic Advisor**: *(advisor name)*
+**Academic Advisers:** Dr. Robert G. de Luna, PECE · Engr. Isagani G. Garcia
 
 ---
 
 ## 📄 License
 
 This project is licensed under the [MIT License](LICENSE).
+
+---
+
+## 📚 Citation
+
+If you use this work in your research, please cite:
+
+> De Guzman, A. M. D., Hernandez, D. K. C., Libarnes, A. L. O., Licayan, J. B. A., Purca, J. M. M., Roxas, A. T., de Luna, R. G., & Garcia, I. G. (2026). *PinyaSuri: An AI-Driven Autonomous Drone System with Grid Localization for Pineapple Afflictions Detection, Classification, and Monitoring*. Polytechnic University of the Philippines – Sto. Tomas Campus.
