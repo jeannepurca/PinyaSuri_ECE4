@@ -35,21 +35,18 @@ env/
 .DS_Store
 
 # Project specific
-*.log
 *.jpg
 *.jpeg
 *.png
 
-# But keep example/template files
-!example*.csv
-!sample*.jpg
+# Runtime logs
+*.log
 
-# Output directories
+# Generated flight images
 drone_images/
 test_flight_images/
-PINYASURI/
 
-# Temporary files
+# Generated temporary files
 *.tmp
 *.bak
 *.orig
