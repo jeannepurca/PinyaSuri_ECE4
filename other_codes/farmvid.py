@@ -2,15 +2,17 @@
 # farmvid.py
 
 import time
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import config
 from picamera2 import Picamera2
 from picamera2.encoders import H264Encoder
 from picamera2.outputs import FfmpegOutput
 from libcamera import controls
 from datetime import datetime
-from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent
-VIDEO_DIR = BASE_DIR / "videos"
+VIDEO_DIR = config.VIDEO_DIR
 FARM_VIDEO_DIR = VIDEO_DIR / "farms"
 
 def ensure_directories():
