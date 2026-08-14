@@ -12,6 +12,7 @@ LOG_DIR = BASE_DIR / "logs"
 IMAGE_DIR = BASE_DIR / "images"
 MODEL_DIR = BASE_DIR / "models"
 JSON_DIR = BASE_DIR / "results"
+VIDEO_DIR = BASE_DIR / "videos"
 
 def ensure_directories():
     """Ensure all base directories exist"""
@@ -19,6 +20,7 @@ def ensure_directories():
     IMAGE_DIR.mkdir(exist_ok=True)
     MODEL_DIR.mkdir(exist_ok=True)
     JSON_DIR.mkdir(exist_ok=True)
+    VIDEO_DIR.mkdir(exist_ok=True)
 
 
 # ============================================================================  

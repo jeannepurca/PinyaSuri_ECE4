@@ -6,10 +6,10 @@ from picamera2 import Picamera2
 from libcamera import controls
 from datetime import datetime
 from pathlib import Path
+import config
 
 # Base Directories
-BASE_DIR = Path(__file__).resolve().parent
-IMAGE_DIR = BASE_DIR / "images"
+IMAGE_DIR = config.IMAGE_DIR
 FARM_IMAGE_DIR = IMAGE_DIR / "farms"
 
 
