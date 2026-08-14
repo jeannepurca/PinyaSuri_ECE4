@@ -36,11 +36,9 @@ env/
 
 # Project specific
 *.log
-*.tflite
 *.jpg
 *.jpeg
 *.png
-*.csv
 
 # But keep example/template files
 !example*.csv

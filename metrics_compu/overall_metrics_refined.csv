@@ -1,0 +1,2 @@
+,altitude_stability_index,altitude_stability_rating,imu_vibration_rms_m_s2,imu_vibration_rating,waypoint_accuracy_rms_m,waypoint_accuracy_rating,hover_position_jitter_rms_m,hover_position_jitter_rating,avg_flight_duration_s,flight_endurance_rating
+overall,8.016,Acceptable,9.781,Acceptable,6.07,Poor,1.18,Acceptable,32.0,Acceptable
