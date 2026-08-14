@@ -1,21 +1,14 @@
-# PinyaSuri Drone System Requirements
-# For Raspberry Pi 5 with Pixhawk 2.4.8
+# PinyaSuri Drone System
+# Raspberry Pi 5 + Pixhawk 2.4.8
+# Raspberry Pi OS Bookworm 64-bit
+# Python 3.11.x
 
-# MAVSDK - For Pixhawk communication
-mavsdk>=1.4.0
+# Pixhawk / MAVLink communication
+mavsdk==3.17.2
+pymavlink==2.4.49
 
-# Camera support for Raspberry Pi Camera Module V3
-picamera2
+# AI inference
+tflite-runtime==2.14.0
 
-# TensorFlow Lite runtime for AI inference
-tflite-runtime
-
-# Image processing
-Pillow>=9.0.0
-numpy>=1.21.0
-
-# Optional but recommended
-# For better async support
-aiofiles
-
-pymavlink>=0.3.0
+# Async file operations
+aiofiles==25.1.0

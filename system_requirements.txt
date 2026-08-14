@@ -1,0 +1,10 @@
+# PinyaSuri System Dependencies
+# Raspberry Pi 5
+# Raspberry Pi OS Bookworm 64-bit
+
+Python 3.11.2
+
+python3-numpy=1:1.24.2-1+deb12u1
+python3-pil=9.4.0-1.1+deb12u1
+python3-picamera2=0.3.31-1
+python3-opencv=4.6.0+dfsg-12
