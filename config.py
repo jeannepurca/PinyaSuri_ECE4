@@ -28,7 +28,7 @@ def ensure_directories():
 # ============================================================================  
 # --- Base server URL
 # For local server (Raspberry Pi network):
-SERVER_BASE = "http://10.12.127.21:5000"
+SERVER_BASE = "http://10.151.68.21:5000"
 
 
 # --- For cloud server
