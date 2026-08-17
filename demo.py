@@ -2,16 +2,18 @@
 # contest_demo.py
 
 """
-PinyaSuri Contest Demo - Auto Classification & Upload
+PinyaSuri Contest Demo - JSON Per Capture
 - Manual image capture only
+- Generate JSON for each capture (1, 2, 3, etc.)
 - AI classification happens automatically after capture
-- Upload to website happens automatically after classification
+- Upload JSON then image to website automatically
 """
 
 import logging
 import sys
 import time
 import cv2
+import json
 from datetime import datetime
 from pathlib import Path
 
@@ -31,10 +33,13 @@ logger = logging.getLogger(__name__)
 
 class ContestDemo:
     """
-    Simple PinyaSuri demo:
+    Simple PinyaSuri demo with per-capture JSON:
     1. Capture image manually
-    2. Classify automatically
-    3. Upload automatically
+    2. Generate JSON for this capture
+    3. Upload JSON to server
+    4. Classify with AI
+    5. Show results
+    6. Upload image to server
     """
     
     def __init__(self):
@@ -53,7 +58,6 @@ class ContestDemo:
         
         # Demo metadata
         self.demo_id = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-        self.flight_id = f"demo_{self.demo_id}"
         self.captures = []  # Track all captures and detections
         self.capture_count = 0
         
@@ -61,15 +65,73 @@ class ContestDemo:
         uploader.test_server_connection()
         
         logger.info(f"✓ System ready!")
-        logger.info(f"  Flight ID: {self.flight_id}")
+        logger.info(f"  Demo ID: {self.demo_id}")
         logger.info("")
+    
+    def create_flight_json(self, capture_num, detections):
+        """Create flight JSON for this specific capture"""
+        flight_id = f"demo_{self.demo_id}_capture{capture_num}"
+        
+        # Calculate detection summary
+        total_pineapples = len(detections)
+        healthy_count = sum(1 for d in detections if d['class_name'] == 'Healthy')
+        afflicted_count = total_pineapples - healthy_count
+        
+        # Get afflictions
+        afflictions = {}
+        for det in detections:
+            if det['class_name'] != 'Healthy':
+                afflictions[det['class_name']] = afflictions.get(det['class_name'], 0) + 1
+        
+        # Get average confidence
+        avg_confidence = sum(d['confidence'] for d in detections) / len(detections) if detections else 0
+        
+        # Most common affliction
+        most_common = max(afflictions.items(), key=lambda x: x[1])[0] if afflictions else None
+        
+        # Create JSON
+        flight_summary = {
+            "id": flight_id,
+            "type": "flight",
+            "date": datetime.now().strftime("%B %d, %Y"),
+            "start_time": datetime.now().strftime("%H:%M:%S"),
+            "end_time": datetime.now().strftime("%H:%M:%S"),
+            "summary": {
+                "total_waypoints": 1,
+                "captured_waypoints": 1,
+                "mission_status": "Demo - Capture {}".format(capture_num),
+                "pineapples_detected": total_pineapples,
+                "healthy_pineapples": healthy_count,
+                "afflicted_pineapples": afflicted_count,
+                "most_common_affliction": most_common,
+                "avg_confidence": round(avg_confidence, 4)
+            },
+            "waypoints": [
+                {
+                    "waypoint_id": f"CAPTURE_{capture_num}",
+                    "images": [],
+                    "num_pineapples": total_pineapples,
+                    "healthy": healthy_count,
+                    "afflicted": afflicted_count,
+                    "afflictions": afflictions
+                }
+            ],
+            "image_metadata": {
+                "total_images": 1,
+                "images_per_waypoint": {f"CAPTURE_{capture_num}": 1}
+            }
+        }
+        
+        return flight_id, flight_summary
     
     def capture_and_process(self):
         """
         Capture one image, then automatically:
-        - Classify it
-        - Show results
-        - Upload to website
+        1. Generate JSON for this capture
+        2. Upload JSON to server
+        3. Classify image
+        4. Show results
+        5. Upload image to server
         """
         self.capture_count += 1
         
@@ -141,30 +203,57 @@ class ContestDemo:
                     logger.info(f"✓ Detection image saved: {Path(det_image_path).name}")
                 logger.info("")
             
-            # 5. UPLOAD TO WEBSITE (AUTOMATIC)
-            logger.info("📤 Uploading to website...")
+            # 5. CREATE AND UPLOAD JSON FOR THIS CAPTURE
+            logger.info("📄 Creating flight JSON for this capture...")
+            flight_id, flight_summary = self.create_flight_json(self.capture_count, detections)
+            logger.info(f"  Flight ID: {flight_id}")
+            logger.info(f"  Pineapples detected: {flight_summary['summary']['pineapples_detected']}")
+            
+            # Save JSON to disk
+            json_path = config.JSON_DIR / f"{flight_id}_summary.json"
+            with open(json_path, 'w') as f:
+                json.dump(flight_summary, f, indent=2)
+            logger.info(f"✓ JSON created: {json_path.name}")
+            logger.info("")
+            
+            # Upload JSON first
+            logger.info("📤 Uploading JSON to website...")
+            try:
+                json_success = uploader.upload_json_directly(json_path)
+                if json_success:
+                    logger.info("✓ JSON uploaded to website!")
+                else:
+                    logger.warning("⚠️  JSON upload may have failed")
+                logger.info("")
+            except Exception as e:
+                logger.warning(f"⚠️  JSON upload error: {e}")
+                logger.info("")
+            
+            # 6. UPLOAD IMAGE TO WEBSITE
+            logger.info("📤 Uploading image to website...")
             
             try:
                 # Use the direct upload function
-                success = uploader.upload_image_directly(
+                img_success = uploader.upload_image_directly(
                     image_file=Path(image_path),
-                    flight_id=self.flight_id,
-                    waypoint=f"WAYPOINT_{self.capture_count}"
+                    flight_id=flight_id,
+                    waypoint=f"CAPTURE_{self.capture_count}"
                 )
                 
-                if success:
+                if img_success:
                     logger.info("✓ Image uploaded to website!")
                 else:
-                    logger.warning("⚠️  Upload may have failed")
+                    logger.warning("⚠️  Image upload may have failed")
             
             except Exception as e:
-                logger.warning(f"⚠️  Upload error: {e}")
+                logger.warning(f"⚠️  Image upload error: {e}")
             
             logger.info("")
             
             # Store capture data
             capture_data = {
                 "capture_num": self.capture_count,
+                "flight_id": flight_id,
                 "image_path": image_path,
                 "total_detections": len(detections),
                 "detections": detections,
@@ -199,7 +288,7 @@ class ContestDemo:
         logger.info("")
         
         for capture in self.captures:
-            logger.info(f"Capture #{capture['capture_num']}: "
+            logger.info(f"Capture #{capture['capture_num']} ({capture['flight_id']}): "
                        f"{capture['total_detections']} pineapples")
             if capture['summary']:
                 for class_name, count in capture['summary'].get('class_counts', {}).items():
@@ -215,7 +304,7 @@ class ContestDemo:
         logger.info("=" * 70)
         logger.info("")
         logger.info("Commands:")
-        logger.info("  c  - Capture image (auto classify & upload)")
+        logger.info("  c  - Capture image (auto classify, create JSON & upload)")
         logger.info("  s  - Show all captures summary")
         logger.info("  q  - Quit")
         logger.info("")
