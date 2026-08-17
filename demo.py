@@ -2,15 +2,14 @@
 # contest_demo.py
 
 """
-PinyaSuri Contest Demo - Simplified
-- Manual image capture
-- AI classification (YOLOv8n)
-- Upload to website
+PinyaSuri Contest Demo - Auto Classification & Upload
+- Manual image capture only
+- AI classification happens automatically after capture
+- Upload to website happens automatically after classification
 """
 
 import logging
 import sys
-import json
 import time
 import cv2
 from datetime import datetime
@@ -33,9 +32,9 @@ logger = logging.getLogger(__name__)
 class ContestDemo:
     """
     Simple PinyaSuri demo:
-    1. Capture images manually
-    2. Classify with AI
-    3. Upload to website
+    1. Capture image manually
+    2. Classify automatically
+    3. Upload automatically
     """
     
     def __init__(self):
@@ -55,6 +54,7 @@ class ContestDemo:
         # Demo metadata
         self.demo_id = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
         self.captures = []  # Track all captures and detections
+        self.capture_count = 0
         
         # Start upload queue
         uploader.start_upload_queue()
@@ -63,41 +63,52 @@ class ContestDemo:
         logger.info(f"  Demo ID: {self.demo_id}")
         logger.info("")
     
-    def capture_image(self, capture_num: int):
+    def capture_and_process(self):
         """
-        Capture one image and classify it
+        Capture one image, then automatically:
+        - Classify it
+        - Show results
+        - Upload to website
         """
+        self.capture_count += 1
+        
         logger.info("=" * 70)
-        logger.info(f"📷 CAPTURE #{capture_num}")
+        logger.info(f"📷 CAPTURE #{self.capture_count}")
         logger.info("=" * 70)
         
         try:
-            # 1. Capture image
+            # 1. CAPTURE IMAGE
             logger.info("📷 Capturing image...")
             image_path = self.camera.capture(
-                waypoint=capture_num,  # Use capture number as identifier
+                waypoint=self.capture_count,
                 flight_number=1,
                 prefix="demo",
                 burst_index=0
             )
             logger.info(f"✓ Image saved: {Path(image_path).name}")
+            logger.info("")
             
-            # 2. Load for detection
+            # 2. LOAD AND CLASSIFY (AUTOMATIC)
+            logger.info("🤖 Running AI classification...")
             frame = cv2.imread(image_path)
             if frame is None:
                 logger.error("❌ Failed to load image!")
-                return None
+                return False
             
             logger.info(f"✓ Image dimensions: {frame.shape[1]}x{frame.shape[0]}")
             
-            # 3. Run AI detection
-            logger.info("🤖 Running AI detection...")
+            # Run detection
             detections = self.classifier.detect_with_nms(
                 frame,
                 iou_threshold=config.NMS_IOU_THRESHOLD
             )
+            logger.info("")
             
-            # 4. Show results
+            # 3. SHOW RESULTS (AUTOMATIC)
+            logger.info("=" * 70)
+            logger.info("📊 DETECTION RESULTS")
+            logger.info("=" * 70)
+            
             if detections:
                 summary = self.classifier.get_detection_summary(detections)
                 logger.info(f"✓ Detected {summary['total_count']} pineapple(s)")
@@ -109,31 +120,57 @@ class ContestDemo:
             else:
                 logger.info("ℹ️  No pineapples detected in this image")
             
-            # 5. Get cropped frame
+            logger.info("=" * 70)
+            logger.info("")
+            
+            # 4. SAVE DETECTION IMAGE WITH BBOXES (AUTOMATIC)
             cropped_frame = self.classifier.get_cropped_frame()
             
-            # 6. Save detection image with bboxes
             if detections and cropped_frame is not None:
-                logger.info("\n💾 Saving detection image...")
+                logger.info("💾 Saving detection image with bounding boxes...")
                 det_image_path = self.camera.save_detection_image(
                     cropped_frame=cropped_frame,
                     detections=detections,
-                    waypoint=capture_num,
+                    waypoint=self.capture_count,
                     flight_number=1,
                     prefix="demo_det",
                     burst_index=0
                 )
                 if det_image_path:
                     logger.info(f"✓ Detection image saved: {Path(det_image_path).name}")
+                logger.info("")
             
-            # 7. Queue image for upload
-            logger.info("\n📤 Queueing for upload...")
+            # 5. QUEUE FOR UPLOAD (AUTOMATIC)
+            logger.info("📤 Uploading to website...")
             uploader.queue_image_upload(image_path)
-            logger.info("✓ Queued")
+            
+            # Wait for upload
+            max_wait = 30
+            start_time = time.time()
+            uploaded = False
+            
+            while time.time() - start_time < max_wait:
+                stats = uploader.upload_queue.get_stats()
+                
+                if stats['queue_size'] == 0:
+                    if stats['image_uploaded'] > 0:
+                        logger.info("✓ Image uploaded to website!")
+                        uploaded = True
+                        break
+                    elif stats['image_failed'] > 0:
+                        logger.error("❌ Upload failed!")
+                        break
+                
+                time.sleep(0.5)
+            
+            if not uploaded:
+                logger.warning("⚠️  Upload still in progress...")
+            
+            logger.info("")
             
             # Store capture data
             capture_data = {
-                "capture_num": capture_num,
+                "capture_num": self.capture_count,
                 "image_path": image_path,
                 "total_detections": len(detections),
                 "detections": detections,
@@ -141,24 +178,23 @@ class ContestDemo:
             }
             self.captures.append(capture_data)
             
-            logger.info("")
-            return capture_data
+            return True
         
         except Exception as e:
             logger.error(f"❌ Error: {e}")
             import traceback
             logger.error(traceback.format_exc())
-            return None
+            return False
     
-    def show_progress(self):
-        """Show all captures and their results"""
+    def show_all_captures(self):
+        """Show summary of all captures and detections"""
         if not self.captures:
             logger.info("ℹ️  No captures yet")
             return
         
         logger.info("")
         logger.info("=" * 70)
-        logger.info("📊 CAPTURE SUMMARY")
+        logger.info("📊 ALL CAPTURES SUMMARY")
         logger.info("=" * 70)
         
         total_images = len(self.captures)
@@ -178,54 +214,6 @@ class ContestDemo:
         logger.info("=" * 70)
         logger.info("")
     
-    def upload_to_website(self):
-        """Upload all captured images to website"""
-        if not self.captures:
-            logger.warning("⚠️  No captures to upload!")
-            return False
-        
-        logger.info("=" * 70)
-        logger.info("📤 UPLOADING TO WEBSITE")
-        logger.info("=" * 70)
-        logger.info("")
-        
-        # Wait for images to upload
-        logger.info("⏳ Waiting for images to upload...")
-        max_wait = 60  # seconds
-        start_time = time.time()
-        
-        while time.time() - start_time < max_wait:
-            stats = uploader.upload_queue.get_stats()
-            
-            elapsed = int(time.time() - start_time)
-            logger.info(f"  [{elapsed}s] Uploaded: {stats['image_uploaded']}, "
-                       f"Failed: {stats['image_failed']}, "
-                       f"Queued: {stats['queue_size']}")
-            
-            if stats['queue_size'] == 0:
-                if stats['image_uploaded'] > 0:
-                    logger.info("✓ All images uploaded!")
-                    break
-                elif stats['image_failed'] > 0:
-                    logger.error("❌ Upload failed!")
-                    break
-            
-            time.sleep(2)
-        
-        # Final stats
-        logger.info("")
-        logger.info("=" * 70)
-        logger.info("📊 UPLOAD RESULTS")
-        logger.info("=" * 70)
-        stats = uploader.upload_queue.get_stats()
-        logger.info(f"✓ Images uploaded: {stats['image_uploaded']}")
-        logger.info(f"❌ Images failed: {stats['image_failed']}")
-        logger.info(f"⏳ Images remaining: {stats['queue_size']}")
-        logger.info("=" * 70)
-        logger.info("")
-        
-        return stats['image_uploaded'] > 0
-    
     def interactive_mode(self):
         """Interactive demo mode"""
         logger.info("=" * 70)
@@ -233,13 +221,10 @@ class ContestDemo:
         logger.info("=" * 70)
         logger.info("")
         logger.info("Commands:")
-        logger.info("  c  - Capture and classify image")
-        logger.info("  s  - Show capture summary")
-        logger.info("  u  - Upload all to website")
+        logger.info("  c  - Capture image (auto classify & upload)")
+        logger.info("  s  - Show all captures summary")
         logger.info("  q  - Quit")
         logger.info("")
-        
-        capture_count = 0
         
         try:
             while True:
@@ -248,20 +233,13 @@ class ContestDemo:
                 if not cmd:
                     continue
                 
-                # Capture
+                # Capture (auto classify & upload)
                 if cmd == 'c':
-                    capture_count += 1
-                    result = self.capture_image(capture_count)
-                    if result is None:
-                        capture_count -= 1
+                    self.capture_and_process()
                 
                 # Show summary
                 elif cmd == 's':
-                    self.show_progress()
-                
-                # Upload
-                elif cmd == 'u':
-                    self.upload_to_website()
+                    self.show_all_captures()
                 
                 # Quit
                 elif cmd == 'q':
@@ -269,7 +247,7 @@ class ContestDemo:
                     break
                 
                 else:
-                    logger.warning("⚠️  Unknown command. Type 'c', 's', 'u', or 'q'")
+                    logger.warning("⚠️  Unknown command. Type 'c', 's', or 'q'")
         
         except KeyboardInterrupt:
             logger.info("\n\nInterrupted by user")
