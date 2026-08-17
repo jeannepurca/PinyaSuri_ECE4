@@ -53,14 +53,15 @@ class ContestDemo:
         
         # Demo metadata
         self.demo_id = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        self.flight_id = f"demo_{self.demo_id}"
         self.captures = []  # Track all captures and detections
         self.capture_count = 0
         
-        # Start upload queue
-        uploader.start_upload_queue()
+        # Test server connection
+        uploader.test_server_connection()
         
         logger.info(f"✓ System ready!")
-        logger.info(f"  Demo ID: {self.demo_id}")
+        logger.info(f"  Flight ID: {self.flight_id}")
         logger.info("")
     
     def capture_and_process(self):
@@ -140,31 +141,24 @@ class ContestDemo:
                     logger.info(f"✓ Detection image saved: {Path(det_image_path).name}")
                 logger.info("")
             
-            # 5. QUEUE FOR UPLOAD (AUTOMATIC)
+            # 5. UPLOAD TO WEBSITE (AUTOMATIC)
             logger.info("📤 Uploading to website...")
-            uploader.queue_image_upload(image_path)
             
-            # Wait for upload
-            max_wait = 30
-            start_time = time.time()
-            uploaded = False
-            
-            while time.time() - start_time < max_wait:
-                stats = uploader.upload_queue.get_stats()
+            try:
+                # Use the direct upload function
+                success = uploader.upload_image_directly(
+                    image_file=Path(image_path),
+                    flight_id=self.flight_id,
+                    waypoint=f"WAYPOINT_{self.capture_count}"
+                )
                 
-                if stats['queue_size'] == 0:
-                    if stats['image_uploaded'] > 0:
-                        logger.info("✓ Image uploaded to website!")
-                        uploaded = True
-                        break
-                    elif stats['image_failed'] > 0:
-                        logger.error("❌ Upload failed!")
-                        break
-                
-                time.sleep(0.5)
+                if success:
+                    logger.info("✓ Image uploaded to website!")
+                else:
+                    logger.warning("⚠️  Upload may have failed")
             
-            if not uploaded:
-                logger.warning("⚠️  Upload still in progress...")
+            except Exception as e:
+                logger.warning(f"⚠️  Upload error: {e}")
             
             logger.info("")
             
@@ -267,12 +261,6 @@ class ContestDemo:
             logger.info("✓ Camera closed")
         except Exception as e:
             logger.warning(f"⚠ Error closing camera: {e}")
-        
-        try:
-            uploader.stop_upload_queue()
-            logger.info("✓ Upload queue stopped")
-        except Exception as e:
-            logger.warning(f"⚠ Error stopping upload: {e}")
         
         logger.info("")
         logger.info("✅ Demo complete!")
